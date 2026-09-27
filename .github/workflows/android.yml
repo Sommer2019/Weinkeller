@@ -2,7 +2,7 @@ name: APK bauen
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -41,6 +41,7 @@ jobs:
           SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('1.0.{0}', github.run_number) }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           chmod +x gradlew
@@ -58,9 +59,14 @@ jobs:
           path: ${{ env.APK_NAME }}
           retention-days: 30
 
-      - name: Release bei Tag (v1.0, v1.1 …)
-        if: startsWith(github.ref, 'refs/tags/v')
+      # Jeder Push auf main erzeugt automatisch ein Release (v1.0.<Build-Nr.>); eigene Tags (v1.1 …) ebenso
+      - name: Release anlegen
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.{0}', github.run_number) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('Weinkeller v1.0.{0}', github.run_number) }}
+          target_commitish: ${{ github.sha }}
           files: ${{ env.APK_NAME }}
           generate_release_notes: true
+          make_latest: true
