@@ -259,7 +259,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         scan = ScanHit(code, cellar.byEan(code))
         viewModelScope.launch {
             val found = try {
-                EanLookup.lookup(getApplication(), code, lookupConfig())
+                EanLookup.lookup(getApplication(), code, activeConfig())
             } catch (e: Throwable) {
                 scan = scan?.takeIf { it.ean == code }?.copy(searching = false, error = "Online-Suche fehlgeschlagen: ${e.message ?: e}")
                 return@launch
@@ -278,6 +278,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         geminiKey = prefs.getString(KEY_GEMINI, null)?.let(SecretStore::decrypt).orEmpty(),
     )
 
+    /** Wie lookupConfig(), aber ohne eigenen Gemini-Schlüssel greift der beim Bauen eingebaute (GitHub-Secret). */
+    private fun activeConfig(): LookupConfig = lookupConfig().let {
+        if (it.geminiKey.isBlank()) it.copy(geminiKey = BuildConfig.GEMINI_API_KEY) else it
+    }
+
     fun saveLookupConfig(c: LookupConfig) {
         prefs.edit()
             .putString(KEY_EANSEARCH, if (c.eanSearchToken.isBlank()) null else SecretStore.encrypt(c.eanSearchToken.trim()))
@@ -286,11 +291,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _events.tryEmit("Online-Quellen gespeichert")
     }
 
-    val hasAi: Boolean get() = lookupConfig().geminiKey.isNotBlank()
+    val hasAi: Boolean get() = activeConfig().geminiKey.isNotBlank()
 
     /** KI-Recherche per Knopf: EAN und/oder Etikett-Foto. Fehlertext statt Exception. */
     suspend fun askAi(ean: String?, label: Uri?): Pair<LookupResult?, String?> {
-        val key = lookupConfig().geminiKey
+        val key = activeConfig().geminiKey
         if (key.isBlank()) return null to "Kein Gemini-Schlüssel eingetragen (Menü → Online-Quellen)"
         return try {
             val r = de.robin.wein.lookup.GeminiLookup.ask(getApplication(), key, ean?.takeIf { !it.startsWith("X") }, label)

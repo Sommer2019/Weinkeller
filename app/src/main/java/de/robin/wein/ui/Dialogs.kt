@@ -440,7 +440,8 @@ fun SourcesDialog(initial: de.robin.wein.lookup.LookupConfig, onSave: (de.robin.
                     supportingText = {
                         Text("Unter aistudio.google.com/apikey mit einem Google-Konto erzeugen, ohne Kreditkarte. " +
                             "Die KI sucht per Google nach der EAN und liest auf Wunsch das Etikett-Foto. " +
-                            "Im Gratis-Zugang darf Google die Anfragen (EAN, Foto) zur Produktverbesserung nutzen.")
+                            "Im Gratis-Zugang darf Google die Anfragen (EAN, Foto) zur Produktverbesserung nutzen." +
+                            if (de.robin.wein.BuildConfig.GEMINI_API_KEY.isNotBlank()) " Leer lassen = eingebauter Schlüssel." else "")
                     },
                 )
                 OutlinedTextField(

@@ -15,6 +15,8 @@ android {
         // In der Pipeline: fortlaufende Build-Nummer, damit Android Updates annimmt
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = "1.0"
+        // Gemini-Schlüssel aus dem GitHub-Secret GEMINI_API_KEY; leer = Nutzer trägt eigenen in der App ein
+        buildConfigField("String", "GEMINI_API_KEY", "\"${System.getenv("GEMINI_API_KEY").orEmpty()}\"")
     }
 
     signingConfigs {
@@ -48,6 +50,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     packaging {
         resources {
