@@ -19,7 +19,6 @@ import de.robin.wein.lookup.LabelOcr
 import de.robin.wein.lookup.LookupResult
 import de.robin.wein.lookup.LookupConfig
 import de.robin.wein.nas.SecretStore
-import de.robin.wein.lookup.LookupResult
 import de.robin.wein.nas.Nas
 import de.robin.wein.nas.NasConfig
 import de.robin.wein.nas.NasConflictException
