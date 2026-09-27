@@ -44,11 +44,20 @@ object EanLookup {
      * Die erste Quelle mit Treffer gewinnt; ein Foto wird notfalls aus einer anderen Quelle ergänzt.
      * Findet niemand die Flasche, liefert EAN-Search per Präfix wenigstens den Hersteller.
      */
-    suspend fun lookup(ctx: android.content.Context, ean: String, cfg: LookupConfig = LookupConfig()): List<LookupResult> = withContext(Dispatchers.IO) {
+    suspend fun lookup(
+        ctx: android.content.Context, ean: String, cfg: LookupConfig = LookupConfig(),
+        onAiError: (String) -> Unit = {},
+    ): List<LookupResult> = withContext(Dispatchers.IO) {
         val sources = listOf<suspend () -> LookupResult?>(
             { openFoodFacts(ean) },
             { upcItemDb(ean) },
-            { if (cfg.geminiKey.isBlank()) null else GeminiLookup.ask(ctx, cfg.geminiKey, ean, null) },
+            {
+                if (cfg.geminiKey.isBlank()) null
+                // Fehler der KI (Schlüssel, Kontingent …) melden statt still zu schlucken
+                else runCatching { GeminiLookup.ask(ctx, cfg.geminiKey, ean, null) }
+                    .onFailure { onAiError((it as? GeminiLookup.GeminiException)?.message ?: "KI-Recherche fehlgeschlagen") }
+                    .getOrNull()
+            },
             { if (cfg.eanSearchToken.isBlank()) null else eanSearch(ean, cfg.eanSearchToken) },
         )
         var hit: LookupResult? = null

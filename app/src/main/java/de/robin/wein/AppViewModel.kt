@@ -257,14 +257,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (code.isEmpty() || scan?.ean == code) return
         scan = ScanHit(code, cellar.byEan(code))
         viewModelScope.launch {
+            var aiError: String? = null
             val found = try {
-                EanLookup.lookup(getApplication(), code, activeConfig())
+                EanLookup.lookup(getApplication(), code, activeConfig()) { aiError = it }
             } catch (e: Throwable) {
                 scan = scan?.takeIf { it.ean == code }?.copy(searching = false, error = "Online-Suche fehlgeschlagen: ${e.message ?: e}")
                 return@launch
             }
             scan = scan?.takeIf { it.ean == code }?.copy(online = found, searching = false,
-                error = if (found.isEmpty()) "Online nichts gefunden – bitte von Hand eintragen" else null)
+                error = if (found.isEmpty()) "Online nichts gefunden – bitte von Hand eintragen" + (aiError?.let { " ($it)" } ?: "") else null)
         }
     }
 

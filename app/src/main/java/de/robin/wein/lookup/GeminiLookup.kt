@@ -23,24 +23,41 @@ import java.util.Calendar
  * (geschickt werden nur EAN und ggf. das Etikett-Foto).
  */
 object GeminiLookup {
-    private const val MODEL = "gemini-2.5-flash"
+    // Alias auf das aktuelle Flash-Modell – feste Versionen stellt Google für neue Schlüssel nach einiger Zeit ab
+    private const val MODEL = "gemini-flash-latest"
     private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 
     class GeminiException(msg: String) : Exception(msg)
 
+    /**
+     * Erst mit Google-Suche; ist die im Kontingent des Schlüssels nicht (mehr) drin (429),
+     * noch einmal ohne Suche – dann nur Modellwissen bzw. das Etikett-Foto.
+     */
     suspend fun ask(ctx: Context, key: String, ean: String?, label: Uri?): LookupResult? = withContext(Dispatchers.IO) {
+        val image = label?.let { jpegBase64(ctx, it) }
+        val response = try {
+            request(key, ean, image, search = true)
+        } catch (e: QuotaException) {
+            request(key, ean, image, search = false)
+        }
+        parse(response)
+    }
+
+    private class QuotaException : Exception()
+
+    private fun request(key: String, ean: String?, image: String?, search: Boolean): String {
         val parts = JSONArray()
-        parts.put(JSONObject().put("text", prompt(ean, label != null)))
-        label?.let { uri -> jpegBase64(ctx, uri)?.let { b64 ->
+        parts.put(JSONObject().put("text", prompt(ean, image != null, search)))
+        image?.let { b64 ->
             parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
-        } }
+        }
         val body = JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
-            .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
             .put("generationConfig", JSONObject().put("temperature", 0.1))
+        if (search) body.put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
 
         val c = URL(ENDPOINT).openConnection() as HttpURLConnection
-        val response = try {
+        try {
             c.requestMethod = "POST"
             c.connectTimeout = 10000
             c.readTimeout = 60000
@@ -48,21 +65,22 @@ object GeminiLookup {
             c.setRequestProperty("Content-Type", "application/json")
             c.setRequestProperty("x-goog-api-key", key)
             c.outputStream.use { it.write(body.toString().toByteArray()) }
-            when (c.responseCode) {
+            return when (c.responseCode) {
                 200 -> c.inputStream.bufferedReader().use { it.readText() }
-                400, 403 -> throw GeminiException("Gemini lehnt den Schlüssel oder die Anfrage ab – Schlüssel prüfen")
-                429 -> throw GeminiException("Tageskontingent von Gemini erreicht – morgen wieder")
+                400, 401, 403 -> throw GeminiException("Gemini lehnt den Schlüssel oder die Anfrage ab – Schlüssel prüfen")
+                404 -> throw GeminiException("Gemini-Modell nicht verfügbar – App aktualisieren")
+                429 -> if (search) throw QuotaException() else throw GeminiException("Tageskontingent von Gemini erreicht – morgen wieder")
                 else -> throw GeminiException("Gemini-Fehler ${c.responseCode}")
             }
         } finally {
             c.disconnect()
         }
-        parse(response)
     }
 
-    private fun prompt(ean: String?, withImage: Boolean) = buildString {
+    private fun prompt(ean: String?, withImage: Boolean, search: Boolean) = buildString {
         append("Du bestimmst einen Wein für eine private Kellerliste.")
-        if (ean != null) append(" Die Flasche hat die EAN/GTIN $ean. Suche im Web nach genau dieser Nummer (Händler, Weingüter, Shops).")
+        if (ean != null) append(" Die Flasche hat die EAN/GTIN $ean." +
+            if (search) " Suche im Web nach genau dieser Nummer (Händler, Weingüter, Shops)." else " Eine Websuche steht nicht zur Verfügung.")
         if (withImage) append(" Das Foto zeigt das Etikett – lies Name, Weingut und Jahrgang davon ab.")
         append(" Antworte NUR mit einem JSON-Objekt, ohne weiteren Text, in dieser Form: ")
         append("""{"gefunden":true,"name":"","weingut":"","jahrgang":null,"land":"","region":"","rebsorte":"","farbe":"","alkohol":"","sicher":"hoch|mittel|niedrig"}""")
