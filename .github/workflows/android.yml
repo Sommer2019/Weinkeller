@@ -59,9 +59,9 @@ jobs:
           path: ${{ env.APK_NAME }}
           retention-days: 30
 
-      # Jeder Push auf main erzeugt automatisch ein Release (v1.0.<Build-Nr.>); eigene Tags (v1.1 …) ebenso
+      # Jeder Push (oder manuelle Start) auf main erzeugt automatisch ein Release (v1.0.<Build-Nr.>); eigene Tags (v1.1 …) ebenso
       - name: Release anlegen
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v1.0.{0}', github.run_number) }}
