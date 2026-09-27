@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Weinglas -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:fillColor="#F4EDEF"
+        android:pathData="M40,30 L68,30 Q70,48 60,56 Q56,59 56,62 L56,74 L64,76 L64,79 L44,79 L44,76 L52,74 L52,62 Q52,59 48,56 Q38,48 40,30 Z" />
+    <path android:fillColor="#B8324F"
+        android:pathData="M41.2,40 L66.8,40 Q66,50 58.5,54.5 Q54,57 49.5,54.5 Q42,50 41.2,40 Z" />
+</vector>
