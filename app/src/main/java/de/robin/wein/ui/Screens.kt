@@ -133,6 +133,8 @@ fun App(vm: AppViewModel) {
                 dlg = if (d.wine == null) Dlg.Book(w.key, MoveKind.BUY) else Dlg.None
             },
             onDismiss = { if (dlg == d) dlg = Dlg.None },
+            initialLabel = d.hit?.label,
+            initialPhoto = d.hit?.photo,
         )
         is Dlg.Book -> vm.cellar.wine(d.key)?.let { w ->
             MovementDialog(
