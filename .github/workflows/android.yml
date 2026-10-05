@@ -91,7 +91,7 @@ jobs:
           serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
           packageName: de.robin.wein
           releaseFiles: ${{ env.AAB_NAME }}
-          track: internal
+          tracks: internal
           # "draft", solange die App noch nie ausgerollt wurde
           status: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
 
