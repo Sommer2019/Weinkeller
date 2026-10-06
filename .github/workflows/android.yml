@@ -92,6 +92,9 @@ jobs:
           packageName: de.robin.wein
           releaseFiles: ${{ env.AAB_NAME }}
           tracks: internal
+          # Hinweise für Tester (max. 500 Zeichen, eine Datei je Sprache);
+          # bei jedem nennenswerten Release anpassen
+          whatsNewDirectory: distribution/whatsnew
           # "draft", solange die App noch nie ausgerollt wurde
           status: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
 
