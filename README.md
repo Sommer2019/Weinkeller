@@ -18,7 +18,7 @@ Dieselbe EAN gilt oft für mehrere Jahrgänge – ein Wein ist deshalb immer EAN
 ## Online-Quellen & Etikett
 Reihenfolge der Suche: Open Food Facts → UPCitemdb → KI-Recherche (optional) → EAN-Search (optional, kostenpflichtig).
 Menü → „Online-Quellen“:
-- **Gemini API-Schlüssel** (kostenlos, aistudio.google.com/apikey, ohne Kreditkarte): Gemini 2.5 Flash sucht per
+- **Gemini API-Schlüssel** (kostenlos, aistudio.google.com/apikey, ohne Kreditkarte): Gemini Flash (fest: gemini-3.6-flash) sucht per
   Google nach der EAN (Händler-/Winzerseiten) und kann das Etikett-Foto lesen. Gratis-Kontingent laut Google:
   bis 500 Anfragen mit Google-Suche pro Tag. Im Gratis-Zugang darf Google die Anfragen (EAN, Foto) zur
   Produktverbesserung verwenden. Läuft automatisch, wenn die freien Datenbanken nichts finden, und per Knopf
