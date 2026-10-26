@@ -78,18 +78,24 @@ fun WineDialog(
     onAskAi: (suspend (String?, Uri?) -> Pair<LookupResult?, String?>)?,
     onSave: (Wine) -> Unit,
     onDismiss: () -> Unit,
+    initialLabel: LabelResult? = null,
+    initialPhoto: Uri? = null,
 ) {
     val first = online.firstOrNull()
+    // Vorschlag für neue Weine: Online-Treffer, sonst das im Scan-Tab gelesene Etikett
+    val seed = if (initial == null) initialLabel else null
     val isNew = initial == null
     var eanText by remember { mutableStateOf(initial?.ean ?: ean) }
-    var name by remember { mutableStateOf(initial?.name ?: first?.name.orEmpty()) }
-    var producer by remember { mutableStateOf(initial?.producer ?: first?.producer.orEmpty()) }
-    var country by remember { mutableStateOf(initial?.country ?: first?.country.orEmpty()) }
-    var region by remember { mutableStateOf(initial?.region ?: first?.region.orEmpty()) }
-    var grape by remember { mutableStateOf(initial?.grape ?: first?.grape.orEmpty()) }
-    var color by remember { mutableStateOf(initial?.color ?: first?.color.orEmpty()) }
+    var name by remember { mutableStateOf(initial?.name ?: first?.name ?: seed?.name.orEmpty()) }
+    var producer by remember { mutableStateOf(initial?.producer ?: first?.producer ?: seed?.producer.orEmpty()) }
+    var country by remember { mutableStateOf(initial?.country ?: first?.country ?: seed?.country.orEmpty()) }
+    var region by remember { mutableStateOf(initial?.region ?: first?.region ?: seed?.region.orEmpty()) }
+    var grape by remember { mutableStateOf(initial?.grape ?: first?.grape ?: seed?.grape.orEmpty()) }
+    var color by remember { mutableStateOf(initial?.color ?: first?.color ?: seed?.color.orEmpty()) }
     var note by remember { mutableStateOf(initial?.note.orEmpty()) }
-    var vintage by remember { mutableStateOf(initial?.vintage?.toString() ?: if (isNew) first?.vintage?.toString().orEmpty() else "") }
+    var vintage by remember {
+        mutableStateOf(initial?.vintage?.toString() ?: if (isNew) (first?.vintage ?: seed?.vintage)?.toString().orEmpty() else "")
+    }
     var noVintage by remember { mutableStateOf(initial != null && initial.vintage == null) }
     var source by remember { mutableStateOf(initial?.source ?: first?.source ?: "manuell") }
     var imageUrl by remember { mutableStateOf(initial?.imageUrl?.ifBlank { null } ?: first?.imageUrl.orEmpty()) }
@@ -97,10 +103,10 @@ fun WineDialog(
     // --- Etikett lesen: Foto oder Galerie → Texterkennung → nur leere Felder füllen
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var label by remember { mutableStateOf<LabelResult?>(null) }
+    var label by remember { mutableStateOf(seed) }
     var reading by remember { mutableStateOf(false) }
     var labelError by remember { mutableStateOf<String?>(null) }
-    var lastPhoto by remember { mutableStateOf<Uri?>(null) }
+    var lastPhoto by remember { mutableStateOf(initialPhoto) }
     var ai by remember { mutableStateOf<LookupResult?>(null) }
     var aiBusy by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }

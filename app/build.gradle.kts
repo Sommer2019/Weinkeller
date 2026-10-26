@@ -6,12 +6,12 @@ plugins {
 
 android {
     namespace = "de.robin.wein"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "de.robin.wein"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         // In der Pipeline: fortlaufende Build-Nummer, damit Android Updates annimmt
         versionCode = System.getenv("VERSION_CODE")?.toIntOrNull() ?: 1
         versionName = System.getenv("VERSION_NAME")?.removePrefix("v") ?: "1.0"

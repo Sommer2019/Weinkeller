@@ -17,14 +17,15 @@ import java.util.Calendar
 
 /**
  * „KI-Recherche“ über die Gemini-API (kostenloser Zugang mit eigenem Schlüssel aus Google AI Studio).
- * Gemini 2.5 Flash darf im Gratis-Zugang die Google-Suche nutzen – findet also Händler- und Winzerseiten,
+ * Gemini Flash darf im Gratis-Zugang die Google-Suche nutzen – findet also Händler- und Winzerseiten,
  * auf denen die EAN steht. Optional wird das Etikett-Foto mitgeschickt.
  * Hinweis: Im Gratis-Zugang darf Google die Anfragen zur Verbesserung seiner Produkte verwenden
  * (geschickt werden nur EAN und ggf. das Etikett-Foto).
  */
 object GeminiLookup {
-    // Alias auf das aktuelle Flash-Modell – feste Versionen stellt Google für neue Schlüssel nach einiger Zeit ab
-    private const val MODEL = "gemini-flash-latest"
+    // Feste Modellversion statt Alias „gemini-flash-latest“: Google rät dazu, das Modell direkt aufzurufen,
+    // damit ein Wechsel hinter dem Alias die Recherche nicht unterbricht
+    private const val MODEL = "gemini-3.6-flash"
     private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 
     class GeminiException(msg: String) : Exception(msg)

@@ -16,6 +16,7 @@ jobs:
     timeout-minutes: 30
     env:
       HAS_KEYSTORE: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      HAS_PLAY_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -47,17 +48,55 @@ jobs:
           chmod +x gradlew
           ./gradlew --no-daemon assembleRelease
 
+      # Google Play: App-Bundle (.aab), nur mit eigenem Schlüssel – Google lehnt Debug-signierte Bundles ab
+      - name: Play-Bundle bauen
+        if: env.HAS_KEYSTORE == 'true'
+        env:
+          SIGNING_STORE_FILE: ${{ env.HAS_KEYSTORE == 'true' && format('{0}/release.jks', runner.temp) || '' }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('1.0.{0}', github.run_number) }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: ./gradlew --no-daemon bundleRelease
+
       - name: APK umbenennen
         run: |
           NAME="${GITHUB_REPOSITORY#*/}-${GITHUB_REF_NAME//\//-}-${GITHUB_RUN_NUMBER}.apk"
           cp app/build/outputs/apk/release/app-release.apk "$NAME"
           echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+          if [ -f app/build/outputs/bundle/release/app-release.aab ]; then
+            AAB="${NAME%.apk}-PlayStore.aab"
+            cp app/build/outputs/bundle/release/app-release.aab "$AAB"
+            echo "AAB_NAME=$AAB" >> "$GITHUB_ENV"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APK_NAME }}
-          path: ${{ env.APK_NAME }}
+          path: |
+            ${{ env.APK_NAME }}
+            ${{ env.AAB_NAME }}
           retention-days: 30
+
+      # Automatisch in den internen Test von Google Play. Braucht das Secret PLAY_SERVICE_ACCOUNT_JSON
+      # (Dienstkonto mit Release-Rechten in der Play Console). Die erste Version muss von Hand hochgeladen werden.
+      # Schlägt der Upload fehl, gibt es nur eine Warnung – das GitHub-Release kommt trotzdem.
+      - name: Upload in Google Play (interner Test)
+        if: env.AAB_NAME != '' && env.HAS_PLAY_JSON == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        continue-on-error: true
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: de.robin.wein
+          releaseFiles: ${{ env.AAB_NAME }}
+          tracks: internal
+          # Hinweise für Tester (max. 500 Zeichen, eine Datei je Sprache);
+          # bei jedem nennenswerten Release anpassen
+          whatsNewDirectory: distribution/whatsnew
+          # "draft", solange die App noch nie ausgerollt wurde
+          status: ${{ vars.PLAY_RELEASE_STATUS || 'completed' }}
 
   # Windows-Version (Compose for Desktop): MSI-Installer + ZIP zum Entpacken ohne Installation
   windows:
@@ -117,6 +156,7 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: |
             dist/*.apk
+            dist/*.aab
             dist/*.msi
             dist/*.zip
           generate_release_notes: true

@@ -43,14 +43,18 @@ sealed interface Source {
     data class Network(val cfg: NasConfig) : Source { override val id get() = cfg.id }
 }
 
-/** Was nach einem Scan angezeigt wird. */
+/** Was nach einem Scan angezeigt wird – per Barcode (ean) oder per Etikett-Foto (ean leer, label/photo gesetzt). */
 data class ScanHit(
     val ean: String,
     val local: List<Wine>,
     val online: List<LookupResult> = emptyList(),
     val searching: Boolean = true,
     val error: String? = null,
-)
+    val label: LabelResult? = null,
+    val photo: Uri? = null,
+) {
+    val isLabel: Boolean get() = photo != null
+}
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -269,6 +273,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Etikett im Scan-Tab fotografiert → Texterkennung → passende Weine aus der Liste vorschlagen. */
+    fun onLabelPhoto(uri: Uri) {
+        scan = ScanHit(ean = "", local = emptyList(), photo = uri)
+        viewModelScope.launch {
+            val l = readLabel(uri)
+            if (scan?.photo != uri) return@launch
+            scan = if (l == null) scan?.copy(searching = false, error = "Kein Text erkannt – näher ran, Etikett gerade halten")
+            else scan?.copy(label = l, local = matchLabel(l), searching = false)
+        }
+    }
+
+    /** Weine, die zum Etikett passen könnten (Name, sonst Erzeuger); exakter Jahrgang zuerst. */
+    private fun matchLabel(l: LabelResult): List<Wine> {
+        val hits = listOf(l.name, l.producer).filter { it.isNotBlank() }
+            .firstNotNullOfOrNull { q -> cellar.search(q).takeIf { it.isNotEmpty() } }.orEmpty()
+        return hits.sortedBy { if (l.vintage != null && it.vintage == l.vintage) 0 else 1 }.take(5)
+    }
+
     fun closeScan() { scan = null }
 
     // ------------------------------------------------------------ Online-Quellen & Etikett
@@ -309,8 +331,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun readLabel(uri: Uri): LabelResult? =
         runCatching { LabelOcr.read(getApplication(), uri) }.getOrNull()
 
-    fun webSearchIntent(ean: String): Intent =
-        Intent(Intent.ACTION_VIEW, Uri.parse(EanLookup.webSearchUrl(ean)))
+    fun webSearchIntent(query: String): Intent =
+        Intent(Intent.ACTION_VIEW, Uri.parse(EanLookup.webSearchUrl(query)))
 
     // ------------------------------------------------------------ Speichern
 
