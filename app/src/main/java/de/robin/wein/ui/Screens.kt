@@ -39,6 +39,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -232,7 +233,7 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
                     else if (vm.unsaved > 0) FilledTonalButton(onClick = { vm.save() }) { Text("Speichern (${vm.unsaved})") }
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Menü") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Wein ohne Scan anlegen …") }, onClick = { menu = false; a.editWine(null, null) })
+                        DropdownMenuItem(text = { Text("Wein von Hand anlegen …") }, onClick = { menu = false; a.editWine(null, null) })
                         HorizontalDivider()
                         if (vm.isNas) DropdownMenuItem(text = { Text("Vom NAS neu laden") }, onClick = { menu = false; vm.reload() })
                         DropdownMenuItem(text = { Text(if (vm.isNas) "NAS-Einstellungen …" else "Auf NAS umstellen …") }, onClick = { menu = false; a.nas() })
@@ -255,7 +256,15 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
             }
         },
         floatingActionButton = {
-            if (tab == 0 && openKey == null) FloatingActionButton(onClick = { tab = 1 }) { Icon(Icons.Filled.Add, "Wein scannen") }
+            if (tab == 0 && openKey == null) Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Wein ganz ohne Barcode von Hand eintragen
+                ExtendedFloatingActionButton(
+                    onClick = { a.editWine(null, null) },
+                    icon = { Icon(Icons.Filled.Edit, null) }, text = { Text("Von Hand") },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                )
+                FloatingActionButton(onClick = { tab = 1 }) { Icon(Icons.Filled.Add, "Wein scannen") }
+            }
         },
         snackbarHost = { SnackbarHost(snackbar) },
         containerColor = MaterialTheme.colorScheme.background,
@@ -270,6 +279,7 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
                     when (action) {
                         is ScanAction.NewWine -> a.editWine(null, action.hit)
                         is ScanAction.Book -> a.book(action.wine.key, action.kind)
+                        ScanAction.Manual -> a.editWine(null, null)
                     }
                 }
             }
@@ -304,7 +314,7 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
         }
         if (list.isEmpty()) {
             Text(
-                if (cellar.wines.isEmpty()) "Noch keine Weine. Unten rechts auf + tippen und den ersten Barcode scannen."
+                if (cellar.wines.isEmpty()) "Noch keine Weine. Unten rechts auf + tippen und den ersten Barcode scannen – oder „Von Hand“ für Weine ohne Barcode."
                 else "Nichts gefunden.",
                 Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
