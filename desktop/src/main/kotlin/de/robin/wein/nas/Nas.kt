@@ -1,0 +1,160 @@
+package de.robin.wein.nas
+
+import com.hierynomus.msdtyp.AccessMask
+import com.hierynomus.mssmb2.SMB2CreateDisposition
+import com.hierynomus.mssmb2.SMB2ShareAccess
+import com.hierynomus.mssmb2.SMBApiException
+import com.hierynomus.smbj.SMBClient
+import com.hierynomus.smbj.SmbConfig
+import com.hierynomus.smbj.auth.AuthenticationContext
+import com.hierynomus.smbj.share.DiskShare
+import kotlinx.coroutines.Dispatchers
+import de.robin.wein.Prefs
+import de.robin.wein.SecretStore
+import kotlinx.coroutines.withContext
+import java.util.EnumSet
+import java.util.concurrent.TimeUnit
+
+/**
+ * Verbindung zu einer Datei auf einer Samba-Freigabe (wie in der Android-App).
+ * address: smb://nas/freigabe/ordner/datei.xlsx  oder  \\nas\freigabe\ordner\datei.xlsm
+ */
+data class NasConfig(
+    val address: String,
+    val user: String,
+    val password: String,
+    val domain: String,
+) {
+    val host: String get() = parts().getOrElse(0) { "" }
+    val share: String get() = parts().getOrElse(1) { "" }
+    /** Pfad innerhalb der Freigabe, mit Backslashes. */
+    val path: String get() = parts().drop(2).joinToString("\\")
+    val fileName: String get() = parts().lastOrNull().orEmpty()
+    val id: String get() = "nas://$host/$share/$path"
+
+    fun isValid() = host.isNotBlank() && share.isNotBlank() && path.isNotBlank()
+
+    private fun parts(): List<String> = address.trim()
+        .removePrefix("smb://").removePrefix("SMB://")
+        .replace('\\', '/')
+        .trim('/')
+        .split('/')
+        .filter { it.isNotBlank() }
+}
+
+class NasConflictException : Exception("Die Datei wurde inzwischen auf dem NAS geändert")
+
+data class NasFile(val bytes: ByteArray, val lastWrite: Long)
+
+object Nas {
+
+    private val config: SmbConfig = SmbConfig.builder()
+        .withTimeout(15, TimeUnit.SECONDS)
+        .withSoTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    suspend fun read(cfg: NasConfig): NasFile = withContext(Dispatchers.IO) {
+        withShare(cfg) { disk ->
+            val bytes = disk.openFile(
+                cfg.path, EnumSet.of(AccessMask.GENERIC_READ), null, SMB2ShareAccess.ALL,
+                SMB2CreateDisposition.FILE_OPEN, null,
+            ).use { f -> f.inputStream.use { it.readBytes() } }
+            NasFile(bytes, lastWrite(disk, cfg.path))
+        }
+    }
+
+    /** Gibt es die Datei schon? (Verbindung/Anmeldung müssen klappen, sonst Exception) */
+    suspend fun exists(cfg: NasConfig): Boolean = withContext(Dispatchers.IO) {
+        withShare(cfg) { disk -> disk.fileExists(cfg.path) }
+    }
+
+    /** Kurzer Verbindungstest: liefert eine lesbare Beschreibung der Datei. */
+    suspend fun test(cfg: NasConfig): String = withContext(Dispatchers.IO) {
+        withShare(cfg) { disk ->
+            if (!disk.fileExists(cfg.path)) return@withShare "Verbunden – ${cfg.fileName} gibt es noch nicht, wird beim ersten Speichern angelegt"
+            val info = disk.getFileInformation(cfg.path)
+            val kb = info.standardInformation.endOfFile / 1024
+            "Verbunden – ${cfg.fileName}, $kb KB"
+        }
+    }
+
+    /**
+     * Schreibt sicher zurück: erst .tmp, dann alte Datei → .bak, dann .tmp → Ziel.
+     * Hat sich die Datei seit dem Laden geändert (anderer Zeitstempel), gibt es eine
+     * NasConflictException – außer bei force.
+     */
+    suspend fun write(cfg: NasConfig, bytes: ByteArray, expectedLastWrite: Long?, force: Boolean): Long =
+        withContext(Dispatchers.IO) {
+            withShare(cfg) { disk ->
+                val path = cfg.path
+                if (!force && expectedLastWrite != null && disk.fileExists(path) && lastWrite(disk, path) != expectedLastWrite) {
+                    throw NasConflictException()
+                }
+                val tmp = "$path.tmp"
+                val bak = path.substringBeforeLast('.') + ".bak"
+                disk.openFile(
+                    tmp, EnumSet.of(AccessMask.GENERIC_WRITE), null, SMB2ShareAccess.ALL,
+                    SMB2CreateDisposition.FILE_OVERWRITE_IF, null,
+                ).use { f -> f.outputStream.use { it.write(bytes) } }
+                try {
+                    if (disk.fileExists(path)) {
+                        disk.openFile(
+                            path, EnumSet.of(AccessMask.DELETE, AccessMask.GENERIC_READ), null, SMB2ShareAccess.ALL,
+                            SMB2CreateDisposition.FILE_OPEN, null,
+                        ).use { it.rename(bak, true) }
+                    }
+                    disk.openFile(
+                        tmp, EnumSet.of(AccessMask.DELETE, AccessMask.GENERIC_READ), null, SMB2ShareAccess.ALL,
+                        SMB2CreateDisposition.FILE_OPEN, null,
+                    ).use { it.rename(path, true) }
+                } catch (e: SMBApiException) {
+                    // Umbenennen nicht erlaubt (z. B. Rechte) → direkt überschreiben
+                    disk.openFile(
+                        path, EnumSet.of(AccessMask.GENERIC_WRITE), null, SMB2ShareAccess.ALL,
+                        SMB2CreateDisposition.FILE_OVERWRITE_IF, null,
+                    ).use { f -> f.outputStream.use { it.write(bytes) } }
+                    runCatching { disk.rm(tmp) }
+                }
+                lastWrite(disk, path)
+            }
+        }
+
+    private fun lastWrite(disk: DiskShare, path: String): Long =
+        disk.getFileInformation(path).basicInformation.lastWriteTime.toEpochMillis()
+
+    private fun <T> withShare(cfg: NasConfig, block: (DiskShare) -> T): T {
+        require(cfg.isValid()) { "Adresse unvollständig – Format: smb://nas/freigabe/ordner/weine.xlsx" }
+        return SMBClient(config).use { client ->
+            client.connect(cfg.host).use { conn ->
+                val auth = if (cfg.user.isBlank()) AuthenticationContext.guest()
+                else AuthenticationContext(cfg.user, cfg.password.toCharArray(), cfg.domain.ifBlank { null })
+                conn.authenticate(auth).use { session ->
+                    (session.connectShare(cfg.share) as DiskShare).use { disk -> block(disk) }
+                }
+            }
+        }
+    }
+
+    // ---------- Einstellungen ----------
+
+    fun load(prefs: Prefs): NasConfig? {
+        val address = prefs.getString("nas_address") ?: return null
+        return NasConfig(
+            address,
+            prefs.getString("nas_user", "").orEmpty(),
+            prefs.getString("nas_pw")?.let(SecretStore::decrypt).orEmpty(),
+            prefs.getString("nas_domain", "").orEmpty(),
+        )
+    }
+
+    fun store(prefs: Prefs, cfg: NasConfig) = prefs.edit {
+        putString("nas_address", cfg.address.trim())
+        putString("nas_user", cfg.user.trim())
+        putString("nas_pw", SecretStore.encrypt(cfg.password))
+        putString("nas_domain", cfg.domain.trim())
+    }
+
+    fun forget(prefs: Prefs) = prefs.edit {
+        remove("nas_address"); remove("nas_user"); remove("nas_pw"); remove("nas_domain")
+    }
+}

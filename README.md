@@ -1,7 +1,7 @@
-# Weinkeller (Android)
+# Weinkeller (Android & Windows)
 
 Weinbestand per Barcode pflegen. Die Liste ist eine Excel-Datei (`.xlsx`), die die App selbst anlegt –
-auf dem NAS (Samba) oder als Datei auf dem Handy.
+auf dem NAS (Samba) oder als Datei auf dem Handy bzw. PC. Handy und PC können dieselbe Datei auf dem NAS benutzen.
 
 ## Bauen
 Android Studio → Projekt öffnen → Run, oder `./gradlew assembleRelease`.
@@ -12,6 +12,9 @@ Android Studio → Projekt öffnen → Run, oder `./gradlew assembleRelease`.
    sonst muss er eingetragen werden (oder „ohne Jahrgang“).
 3. Danach direkt Einkauf buchen: Anzahl, Preis je Flasche, Datum (heute, änderbar).
 4. Schon vorhanden (gleiche EAN): „+ Kauf“ / „− Verkauf“ oder „Anderer Jahrgang“.
+
+Ohne Barcode: im Bestand „Von Hand“ (oder im Scan-Tab „Kein Barcode? Wein von Hand anlegen“) – alle Felder selbst
+eintragen, die EAN bleibt leer. Die App vergibt dann intern eine eigene Nummer.
 
 Dieselbe EAN gilt oft für mehrere Jahrgänge – ein Wein ist deshalb immer EAN + Jahrgang.
 
@@ -57,10 +60,24 @@ Verkäufe ohne Preis zählen als Eigenverbrauch; fehlt der Einkaufspreis, wird d
 - Nichts wird automatisch gelöscht: Weine mit Bestand 0 bleiben, Buchungen verschwinden nur per Hand.
 - Eigene Zusatzspalten im Blatt „Weine“ bleiben erhalten; Formatierung macht die App beim Speichern neu.
 
+## Windows-Version
+
+Ordner `desktop/` – dieselbe Fachlogik (Excel-Datei, Bestand, Auswertung) und Oberfläche wie auf dem Handy,
+als Windows-Programm (Compose for Desktop). Unterschiede zum Handy:
+- **Scannen** per USB-/Bluetooth-Barcodescanner (der „tippt“ die EAN samt Enter ins Feld) oder Eintippen. Keine Kamera.
+- **Etikett**: keine Texterkennung auf dem PC – ein Etikett-Foto (Datei) kann an die KI-Recherche gehen.
+- **Inserieren**: Text in die Zwischenablage, Bild nach `Bilder\Weinkeller`, Webseite öffnet im Browser.
+- Einstellungen, Arbeitskopie und Bilder liegen in `%APPDATA%\Weinkeller`; Passwörter mit der Windows-Datenschutz-API verschlüsselt.
+- Strg+S speichert; beim Schließen mit ungespeicherten Änderungen fragt das Programm nach.
+
+Bauen (braucht JDK 17+): `./gradlew -p desktop run` zum Starten, `./gradlew -p desktop packageMsi` für den Installer
+(nur unter Windows). Die Pipeline baut beides automatisch: `.msi` (Installation ohne Admin-Rechte, Updates ersetzen
+die alte Version) und `.zip` (entpacken, `Weinkeller.exe` starten).
+
 ## GitHub & automatischer APK-Bau
 
-Die Pipeline (`.github/workflows/android.yml`) baut bei jedem Push auf `main` ein Release-APK
-(Actions → letzter Lauf → Artifacts). Ein Tag `v…` erzeugt zusätzlich ein GitHub-Release mit dem APK.
+Die Pipeline (`.github/workflows/android.yml`) baut bei jedem Push auf `main` ein Release-APK und die Windows-Version
+(Actions → letzter Lauf → Artifacts) und legt ein GitHub-Release mit APK, MSI und ZIP an. Ein Tag `v…` ebenso.
 
 Einmalig hochladen (GitHub CLI):
 

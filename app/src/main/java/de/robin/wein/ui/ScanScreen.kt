@@ -70,6 +70,8 @@ import de.robin.wein.core.Wine
 sealed interface ScanAction {
     data class NewWine(val hit: ScanHit) : ScanAction
     data class Book(val wine: Wine, val kind: MoveKind) : ScanAction
+    /** Ohne Barcode: alles von Hand eintragen. */
+    data object Manual : ScanAction
 }
 
 @Composable
@@ -93,7 +95,7 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
 
         val hit = vm.scan
         if (hit == null) {
-            ManualEan(Modifier.align(Alignment.BottomCenter)) { vm.onBarcode(it) }
+            ManualEan(Modifier.align(Alignment.BottomCenter), onManual = { onAction(ScanAction.Manual) }) { vm.onBarcode(it) }
         } else {
             ScanSheet(
                 hit = hit,
@@ -158,18 +160,21 @@ private fun BarcodeCamera(onCode: (String) -> Unit, paused: Boolean) {
 }
 
 @Composable
-private fun ManualEan(modifier: Modifier, onEan: (String) -> Unit) {
+private fun ManualEan(modifier: Modifier, onManual: () -> Unit, onEan: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), tonalElevation = 2.dp) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                text, { v -> text = v.filter { it.isDigit() }.take(14) }, Modifier.weight(1f),
-                label = { Text("EAN eintippen") }, singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { if (text.length >= 8) { onEan(text); text = "" } }),
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(enabled = text.length >= 8, onClick = { onEan(text); text = "" }) { Text("Suchen") }
+        Column(Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    text, { v -> text = v.filter { it.isDigit() }.take(14) }, Modifier.weight(1f),
+                    label = { Text("EAN eintippen") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { if (text.length >= 8) { onEan(text); text = "" } }),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(enabled = text.length >= 8, onClick = { onEan(text); text = "" }) { Text("Suchen") }
+            }
+            TextButton(onClick = onManual) { Text("Kein Barcode? Wein von Hand anlegen") }
         }
     }
 }
