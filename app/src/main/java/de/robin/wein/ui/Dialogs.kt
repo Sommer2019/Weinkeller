@@ -23,6 +23,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -40,10 +42,12 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import de.robin.wein.AutoRead
 import de.robin.wein.core.LabelResult
 import de.robin.wein.core.MoveKind
 import de.robin.wein.core.Movement
@@ -68,16 +72,19 @@ fun euro(v: Double?): String = v?.let { String.format(Locale.GERMANY, "%.2f €"
 /**
  * initial = vorhandener Wein (bearbeiten) oder null (neu).
  * Online-Vorschläge überschreiben nie, was schon eingetragen ist – „Übernehmen“ füllt nur leere Felder.
+ * Ohne Barcode: Fotos machen, Daten selbst eintragen oder per „Automatisch einlesen“ aus den Fotos holen.
  */
 @Composable
 fun WineDialog(
     initial: Wine?,
     ean: String,
     online: List<LookupResult>,
-    onReadLabel: suspend (Uri) -> LabelResult?,
-    onAskAi: (suspend (String?, Uri?) -> Pair<LookupResult?, String?>)?,
+    onImportPhoto: suspend (Uri) -> String?,
+    onAutoRead: suspend (String?, List<String>) -> AutoRead,
+    canAi: Boolean,
     onSave: (Wine) -> Unit,
     onDismiss: () -> Unit,
+    initialQr: String? = null,
     initialLabel: LabelResult? = null,
     initialPhoto: Uri? = null,
 ) {
@@ -93,6 +100,8 @@ fun WineDialog(
     var grape by remember { mutableStateOf(initial?.grape ?: first?.grape ?: seed?.grape.orEmpty()) }
     var color by remember { mutableStateOf(initial?.color ?: first?.color ?: seed?.color.orEmpty()) }
     var note by remember { mutableStateOf(initial?.note.orEmpty()) }
+    var rating by remember { mutableStateOf(initial?.rating.orEmpty()) }
+    var qr by remember { mutableStateOf(initial?.qr?.ifBlank { null } ?: initialQr.orEmpty()) }
     var vintage by remember {
         mutableStateOf(initial?.vintage?.toString() ?: if (isNew) (first?.vintage ?: seed?.vintage)?.toString().orEmpty() else "")
     }
@@ -100,16 +109,15 @@ fun WineDialog(
     var source by remember { mutableStateOf(initial?.source ?: first?.source ?: "manuell") }
     var imageUrl by remember { mutableStateOf(initial?.imageUrl?.ifBlank { null } ?: first?.imageUrl.orEmpty()) }
 
-    // --- Etikett lesen: Foto oder Galerie → Texterkennung → nur leere Felder füllen
+    // --- Fotos: aufnehmen/auswählen, auf Knopfdruck einlesen (Texterkennung + KI) → nur leere Felder füllen
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val photos = remember { mutableStateListOf<String>().apply { addAll(initial?.photos.orEmpty()) } }
+    var importing by remember { mutableStateOf(false) }
     var label by remember { mutableStateOf(seed) }
-    var reading by remember { mutableStateOf(false) }
-    var labelError by remember { mutableStateOf<String?>(null) }
-    var lastPhoto by remember { mutableStateOf(initialPhoto) }
     var ai by remember { mutableStateOf<LookupResult?>(null) }
-    var aiBusy by remember { mutableStateOf(false) }
-    var aiError by remember { mutableStateOf<String?>(null) }
+    var reading by remember { mutableStateOf(false) }
+    var readError by remember { mutableStateOf<String?>(null) }
     fun applyOnline(r: LookupResult) {
         if (name.isBlank()) name = r.name
         if (producer.isBlank()) producer = r.producer
@@ -129,22 +137,22 @@ fun WineDialog(
         if (color.isBlank()) color = l.color
         if (vintage.isBlank() && !noVintage) l.vintage?.let { vintage = it.toString() }
     }
-    fun read(uri: Uri) {
-        lastPhoto = uri
-        reading = true; labelError = null
+    fun addPhotos(uris: List<Uri>) {
+        importing = true
         scope.launch {
-            val l = onReadLabel(uri)
-            reading = false
-            if (l == null) labelError = "Kein Text erkannt – näher ran, Etikett gerade halten" else { label = l; applyLabel(l) }
+            uris.forEach { u -> onImportPhoto(u)?.let { photos += it } }
+            importing = false
         }
     }
+    // Im Scan-Tab fotografiertes Etikett gleich als erstes Foto übernehmen
+    LaunchedEffect(initialPhoto) { initialPhoto?.let { addPhotos(listOf(it)) } }
     val photoUri = remember {
         val f = File(File(ctx.cacheDir, "etiketten").apply { mkdirs() }, "etikett.jpg")
         FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", f)
     }
-    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) read(photoUri) }
+    val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok -> if (ok) addPhotos(listOf(photoUri)) }
     val askCamera = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok -> if (ok) takePhoto.launch(photoUri) }
-    val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(::read) }
+    val pickPhotos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(6)) { uris -> if (uris.isNotEmpty()) addPhotos(uris) }
 
     val vintageNum = vintage.toIntOrNull()
     val vintageOk = noVintage || (vintageNum != null && vintageNum in 1900..(LocalDate.now().year + 1))
@@ -177,50 +185,60 @@ fun WineDialog(
                         }
                     }
                 }
+                Text("Fotos", style = MaterialTheme.typography.labelLarge)
+                if (photos.isNotEmpty()) PhotoStrip(photos, 88.dp, onRemove = { photos.remove(it) })
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedButton(onClick = {
                         if (ContextCompat.checkSelfPermission(ctx, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) takePhoto.launch(photoUri)
                         else askCamera.launch(Manifest.permission.CAMERA)
-                    }, enabled = !reading) { Text("Etikett fotografieren") }
-                    TextButton(onClick = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !reading) {
+                    }, enabled = !importing) { Text("Foto machen") }
+                    TextButton(onClick = { pickPhotos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }, enabled = !importing) {
                         Text("Aus Galerie")
                     }
+                    if (importing) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    FilledTonalButton(
+                        enabled = !reading && !importing && (photos.isNotEmpty() || (canAi && eanText.isNotBlank())),
+                        onClick = {
+                            reading = true; readError = null
+                            scope.launch {
+                                val r = onAutoRead(eanText.ifBlank { null }, photos.toList())
+                                reading = false
+                                readError = r.error
+                                r.ai?.let { ai = it; applyOnline(it) }
+                                r.label?.let { label = it; applyLabel(it) }
+                                if (source == "manuell" && (r.ai != null || r.label != null)) source = r.ai?.source ?: "Etikett"
+                            }
+                        },
+                    ) { Text("Automatisch einlesen") }
+                    Spacer(Modifier.width(8.dp))
                     if (reading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
                 }
-                if (onAskAi != null) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(enabled = !aiBusy, onClick = {
-                            aiBusy = true; aiError = null
-                            scope.launch {
-                                val (r, err) = onAskAi(eanText.ifBlank { null }, lastPhoto)
-                                aiBusy = false
-                                aiError = err
-                                if (r != null) { ai = r; applyOnline(r) }
-                            }
-                        }) { Text(if (lastPhoto != null) "KI-Recherche mit Etikett" else "KI-Recherche") }
-                        if (aiBusy) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                    }
-                    aiError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
-                    ai?.let { r ->
-                        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text(r.source, style = MaterialTheme.typography.labelMedium)
-                                Text(r.raw, style = MaterialTheme.typography.bodySmall)
-                                if (r.name.isNotBlank() && r.name != name) TextButton(onClick = { name = r.name }) { Text("Name übernehmen: ${r.name}") }
-                                if (r.vintage != null && r.vintage.toString() != vintage) TextButton(onClick = { noVintage = false; vintage = r.vintage.toString() }) {
-                                    Text("Jahrgang übernehmen: ${r.vintage}")
-                                }
+                Text(
+                    if (canAi) "Liest die Fotos auf dem Gerät und fragt die KI-Recherche – füllt nur leere Felder."
+                    else "Liest die Fotos auf dem Gerät – füllt nur leere Felder. Mit Gemini-Schlüssel (Menü → Online-Quellen) zusätzlich KI-Recherche.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                readError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                ai?.let { r ->
+                    Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text(r.source, style = MaterialTheme.typography.labelMedium)
+                            Text(r.raw, style = MaterialTheme.typography.bodySmall)
+                            if (r.name.isNotBlank() && r.name != name) TextButton(onClick = { name = r.name }) { Text("Name übernehmen: ${r.name}") }
+                            if (r.vintage != null && r.vintage.toString() != vintage) TextButton(onClick = { noVintage = false; vintage = r.vintage.toString() }) {
+                                Text("Jahrgang übernehmen: ${r.vintage}")
                             }
                         }
                     }
                 }
-                labelError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 label?.let { l ->
                     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
                         Column(Modifier.padding(12.dp)) {
-                            Text("Vom Etikett gelesen", style = MaterialTheme.typography.labelMedium)
+                            Text("Von den Fotos gelesen", style = MaterialTheme.typography.labelMedium)
                             Text(l.raw, style = MaterialTheme.typography.bodySmall, maxLines = 4)
                             if (l.name.isNotBlank() && l.name != name) {
                                 TextButton(onClick = { name = l.name }) { Text("Name übernehmen: ${l.name}") }
@@ -252,18 +270,22 @@ fun WineDialog(
                 Row {
                     OutlinedTextField(country, { country = it }, Modifier.weight(1f), label = { Text("Land") }, singleLine = true)
                     Spacer(Modifier.width(8.dp))
-                    OutlinedTextField(region, { region = it }, Modifier.weight(1f), label = { Text("Region") }, singleLine = true)
+                    OutlinedTextField(region, { region = it }, Modifier.weight(1f), label = { Text("Region / Appellation") }, singleLine = true)
                 }
                 OutlinedTextField(grape, { grape = it }, Modifier.fillMaxWidth(), label = { Text("Rebsorte") }, singleLine = true)
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     COLORS.forEach { c -> FilterChip(selected = color == c, onClick = { color = if (color == c) "" else c }, label = { Text(c) }) }
                 }
+                OutlinedTextField(rating, { rating = it }, Modifier.fillMaxWidth(), label = { Text("Bewertung") },
+                    placeholder = { Text("z. B. Parker 95, eigene ★★★★") }, singleLine = true)
                 OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), label = { Text("Notiz") })
                 OutlinedTextField(
                     eanText, { v -> eanText = v.filter { it.isDigit() } }, Modifier.fillMaxWidth(),
                     label = { Text("EAN (leer = ohne Barcode)") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
+                OutlinedTextField(qr, { qr = it.trim() }, Modifier.fillMaxWidth(), label = { Text("QR-Code / E-Label-Link (optional)") },
+                    singleLine = true, supportingText = { Text("Damit findet ein QR-Scan den Wein wieder.") })
             }
         },
         confirmButton = {
@@ -273,7 +295,7 @@ fun WineDialog(
                 onSave(base.copy(
                     ean = finalEan, vintage = if (noVintage) null else vintageNum, name = name.trim(),
                     producer = producer.trim(), country = country.trim(), region = region.trim(), grape = grape.trim(),
-                    color = color, note = note.trim(), source = source, imageUrl = imageUrl,
+                    color = color, note = note.trim(), rating = rating.trim(), qr = qr.trim(), source = source, imageUrl = imageUrl, photos = photos.toList(),
                 ))
                 onDismiss()
             }) { Text("Speichern") }

@@ -5,7 +5,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import de.robin.wein.core.Cellar
+import de.robin.wein.core.LabelResult
 import de.robin.wein.core.Movement
+import de.robin.wein.core.QrCode
 import de.robin.wein.core.Wine
 import de.robin.wein.lookup.EanLookup
 import de.robin.wein.lookup.GeminiLookup
@@ -14,6 +16,7 @@ import de.robin.wein.lookup.LookupResult
 import de.robin.wein.nas.Nas
 import de.robin.wein.nas.NasConfig
 import de.robin.wein.nas.NasConflictException
+import de.robin.wein.nas.PHOTO_DIR
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -22,11 +25,18 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.Desktop
+import java.awt.RenderingHints
+import java.awt.geom.AffineTransform
+import java.awt.image.BufferedImage
 import java.io.File
 import java.io.IOException
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.util.UUID
+import javax.imageio.ImageIO
 
 sealed interface Phase {
     data object Loading : Phase
@@ -40,6 +50,9 @@ sealed interface Source {
     data class Network(val cfg: NasConfig) : Source { override val id get() = cfg.id }
 }
 
+/** Ergebnis von „Automatisch einlesen“ – am PC nur KI-Recherche (keine Texterkennung auf dem Gerät). */
+data class AutoRead(val label: LabelResult?, val ai: LookupResult?, val error: String?)
+
 /** Was nach einem Scan angezeigt wird. */
 data class ScanHit(
     val ean: String,
@@ -47,6 +60,8 @@ data class ScanHit(
     val online: List<LookupResult> = emptyList(),
     val searching: Boolean = true,
     val error: String? = null,
+    /** Inhalt eines QR-Codes ohne EAN (meist der E-Label-Link). */
+    val qr: String? = null,
 )
 
 /** Desktop-Gegenstück zum AppViewModel der Android-App – Dateien statt Android-URIs, Einstellungen in %APPDATA%. */
@@ -246,6 +261,31 @@ class AppViewModel {
 
     // ------------------------------------------------------------ Scannen (USB-Scanner oder Eintippen)
 
+    /**
+     * Alles, was der Scanner liefert: EAN, QR-Code mit GTIN (GS1-Link) → wie ein Barcode;
+     * sonst QR-Code mit Link (E-Label) → Wein über den gespeicherten Link wiederfinden und die Seite auslesen.
+     */
+    fun onCode(raw: String) {
+        val text = raw.trim()
+        if (text.isEmpty()) return
+        QrCode.gtin(text)?.let { return onBarcode(it) }
+        if (scan?.qr == text) return
+        val url = QrCode.url(text)
+        if (url == null) {
+            scan = ScanHit(ean = "", local = cellar.byQr(text), qr = text, searching = false,
+                error = "QR-Code ohne Link und ohne EAN – Inhalt wird beim Anlegen gespeichert")
+            return
+        }
+        scan = ScanHit(ean = "", local = cellar.byQr(url), qr = url)
+        scope.launch {
+            var aiError: String? = null
+            val found = runCatching { EanLookup.lookupQr(url, activeConfig()) { aiError = it } }.getOrDefault(emptyList())
+            scan = scan?.takeIf { it.qr == url }?.copy(online = found, searching = false,
+                error = if (found.isEmpty()) "E-Label-Seite nicht auslesbar – bitte von Hand eintragen oder Fotos einlesen" +
+                    (aiError?.let { " ($it)" } ?: "") else null)
+        }
+    }
+
     fun onBarcode(ean: String) {
         val code = ean.filter { it.isDigit() }
         if (code.isEmpty() || scan?.ean == code) return
@@ -288,18 +328,89 @@ class AppViewModel {
     val hasAi: Boolean get() = activeConfig().geminiKey.isNotBlank()
 
     /** KI-Recherche per Knopf: EAN und/oder Etikett-Foto. Fehlertext statt Exception. */
-    suspend fun askAi(ean: String?, label: File?): Pair<LookupResult?, String?> {
+    suspend fun askAi(ean: String?, labels: List<File>): Pair<LookupResult?, String?> {
         val key = activeConfig().geminiKey
         if (key.isBlank()) return null to "Kein Gemini-Schlüssel eingetragen (Menü → Online-Quellen)"
         return try {
-            val r = GeminiLookup.ask(key, ean?.takeIf { !it.startsWith("X") }, label)
+            val r = GeminiLookup.ask(key, ean?.takeIf { !it.startsWith("X") }, labels)
             r to (if (r == null) "KI hat den Wein nicht sicher gefunden" else null)
         } catch (e: Throwable) {
             null to (e.message ?: e.toString())
         }
     }
 
+    /** „Automatisch einlesen“: KI-Recherche mit EAN und bis zu drei Fotos. Füllt im Dialog nur leere Felder. */
+    suspend fun autoRead(ean: String?, photos: List<String>): AutoRead {
+        val files = photos.mapNotNull { photoFile(it) }
+        if (!hasAi) return AutoRead(null, null, "Automatisch einlesen braucht am PC die KI-Recherche – Gemini-Schlüssel unter Menü → Online-Quellen")
+        if (files.isEmpty() && ean.isNullOrBlank()) return AutoRead(null, null, "Erst ein Foto hinzufügen")
+        val (ai, err) = askAi(ean, files.take(3))
+        return AutoRead(null, ai, err)
+    }
+
     fun openWebSearch(ean: String) = openUrl(EanLookup.webSearchUrl(ean))
+
+    // ------------------------------------------------------------ Eigene Fotos
+
+    /**
+     * Weinliste als Datei: Fotos im Ordner „Weinkeller-Fotos“ daneben (sieht man im Explorer, wandert mit der Datei).
+     * Weinliste auf dem NAS: Kopie in %APPDATA%\Weinkeller\fotos, das Original im Ordner neben der Liste auf dem NAS.
+     */
+    private val photoDir: File
+        get() = when (val s = source) {
+            is Source.Local -> File(s.file.absoluteFile.parentFile, PHOTO_DIR)
+            else -> File(dataDir, "fotos")
+        }.apply { mkdirs() }
+    private val photoMissing = HashSet<String>()
+
+    /** Foto übernehmen: gedreht wie aufgenommen, auf max. 1600 px verkleinert, als JPEG. Liefert den Dateinamen. */
+    suspend fun importPhoto(file: File): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val bytes = file.readBytes()
+            var img = ImageIO.read(bytes.inputStream()) ?: return@runCatching null
+            img = rotate(img, jpegOrientation(bytes))
+            val scale = minOf(1.0, 1600.0 / maxOf(img.width, img.height))
+            val w = (img.width * scale).toInt().coerceAtLeast(1)
+            val h = (img.height * scale).toInt().coerceAtLeast(1)
+            val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+            out.createGraphics().apply {
+                setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
+                drawImage(img, 0, 0, w, h, null)
+                dispose()
+            }
+            val name = "foto-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) +
+                "-" + UUID.randomUUID().toString().take(6) + ".jpg"
+            ImageIO.write(out, "jpg", File(photoDir, name))
+            name
+        }.getOrNull()
+    }
+
+    /** Foto auf dem PC – fehlt es (am Handy aufgenommen), wird es vom NAS geholt. */
+    suspend fun photoFile(name: String): File? {
+        val f = File(photoDir, name)
+        if (f.exists()) return f
+        val cfg = (source as? Source.Network)?.cfg ?: return null
+        if (name in photoMissing) return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val tmp = File(f.parentFile, "$name.tmp")
+                tmp.writeBytes(Nas.readPhoto(cfg, name))
+                Files.move(tmp.toPath(), f.toPath(), StandardCopyOption.REPLACE_EXISTING)
+                f
+            }.getOrElse { photoMissing += name; null }
+        }
+    }
+
+    /** Fotos, die das NAS noch nicht hat, hochladen. Fehler stören das Speichern der Liste nicht. */
+    private suspend fun uploadPhotos(cfg: NasConfig) {
+        val wanted = cellar.wines.flatMap { it.photos }.toSet()
+        if (wanted.isEmpty()) return
+        runCatching {
+            val there = Nas.listPhotos(cfg)
+            val missing = wanted.filter { it !in there }.mapNotNull { n -> File(photoDir, n).takeIf { it.exists() }?.let { n to it.readBytes() } }
+            Nas.writePhotos(cfg, missing.toMap())
+        }.onFailure { _events.tryEmit("Fotos nicht aufs NAS geladen: ${it.message ?: it} – nächstes Speichern versucht es erneut") }
+    }
 
     // ------------------------------------------------------------ Speichern
 
@@ -317,6 +428,7 @@ class AppViewModel {
                         withContext(Dispatchers.IO) { cacheFile().writeBytes(bytes) }
                         prefs.edit { putLong(KEY_BASE_WRITE, lw) }
                         offline = false
+                        uploadPhotos(src.cfg)
                     }
                 }
                 unsaved = 0
@@ -391,4 +503,51 @@ class AppViewModel {
 
 fun openUrl(url: String) {
     runCatching { Desktop.getDesktop().browse(URI(url)) }
+}
+
+/** EXIF-Ausrichtung eines JPEG (1 = normal); Handyfotos sind oft nur per EXIF „gedreht“. */
+private fun jpegOrientation(b: ByteArray): Int {
+    fun u16(i: Int, le: Boolean) = if (le) (b[i].toInt() and 0xFF) or ((b[i + 1].toInt() and 0xFF) shl 8)
+        else ((b[i].toInt() and 0xFF) shl 8) or (b[i + 1].toInt() and 0xFF)
+    fun u32(i: Int, le: Boolean) = if (le) u16(i, true) or (u16(i + 2, true) shl 16) else (u16(i, false) shl 16) or u16(i + 2, false)
+    return runCatching {
+        if (u16(0, false) != 0xFFD8) return 1
+        var i = 2
+        while (i + 4 < b.size) {
+            val marker = u16(i, false)
+            val len = u16(i + 2, false)
+            if (marker == 0xFFE1 && String(b, i + 4, 4, Charsets.ISO_8859_1) == "Exif") {
+                val tiff = i + 10
+                val le = b[tiff] == 'I'.code.toByte()
+                val ifd = tiff + u32(tiff + 4, le)
+                val n = u16(ifd, le)
+                for (k in 0 until n) {
+                    val e = ifd + 2 + k * 12
+                    if (u16(e, le) == 0x0112) return u16(e + 8, le)
+                }
+                return 1
+            }
+            if (marker == 0xFFDA) return 1
+            i += 2 + len
+        }
+        1
+    }.getOrDefault(1)
+}
+
+private fun rotate(img: BufferedImage, orientation: Int): BufferedImage {
+    val deg = when (orientation) { 3 -> 180; 6 -> 90; 8 -> 270; else -> return img }
+    val swap = deg != 180
+    val w = if (swap) img.height else img.width
+    val h = if (swap) img.width else img.height
+    val out = BufferedImage(w, h, BufferedImage.TYPE_INT_RGB)
+    out.createGraphics().apply {
+        transform(AffineTransform().apply {
+            translate(w / 2.0, h / 2.0)
+            rotate(Math.toRadians(deg.toDouble()))
+            translate(-img.width / 2.0, -img.height / 2.0)
+        })
+        drawImage(img, 0, 0, null)
+        dispose()
+    }
+    return out
 }

@@ -1,6 +1,7 @@
 package de.robin.wein.ui
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.widget.Toast
@@ -97,7 +98,7 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
 
     Box(Modifier.fillMaxSize()) {
         if (granted) {
-            ScanCamera(onCode = { vm.onBarcode(it) }, onLabel = { vm.onLabelPhoto(it) }, onGallery = pickGallery, paused = vm.scan != null)
+            ScanCamera(onCode = { vm.onCode(it) }, onLabel = { vm.onLabelPhoto(it) }, onGallery = pickGallery, paused = vm.scan != null)
         } else {
             Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Zum Scannen der Barcodes braucht die App die Kamera.", textAlign = TextAlign.Center)
@@ -116,7 +117,11 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
                 stockOf = { vm.cellar.stats(it.key).stock },
                 onBook = { w, k -> onAction(ScanAction.Book(w, k)) },
                 onNew = { onAction(ScanAction.NewWine(hit)) },
-                onWeb = { ctx.startActivity(vm.webSearchIntent(hit.ean.ifBlank { hit.label?.let { "${it.producer} ${it.name}".trim() }.orEmpty() })) },
+                onWeb = {
+                    val q = hit.qr?.takeIf { it.startsWith("http", true) }
+                    ctx.startActivity(if (q != null) Intent(Intent.ACTION_VIEW, Uri.parse(q))
+                        else vm.webSearchIntent(hit.ean.ifBlank { hit.label?.let { "${it.producer} ${it.name}".trim() }.orEmpty() }))
+                },
                 onClose = { vm.closeScan() },
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
@@ -142,7 +147,7 @@ private fun ScanCamera(onCode: (String) -> Unit, onLabel: (Uri) -> Unit, onGalle
     DisposableEffect(owner) {
         val scanner = BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(Barcode.FORMAT_EAN_13, Barcode.FORMAT_EAN_8, Barcode.FORMAT_UPC_A, Barcode.FORMAT_UPC_E)
+                .setBarcodeFormats(Barcode.FORMAT_EAN_13, Barcode.FORMAT_EAN_8, Barcode.FORMAT_UPC_A, Barcode.FORMAT_UPC_E, Barcode.FORMAT_QR_CODE)
                 .build()
         )
         val exec = ContextCompat.getMainExecutor(ctx)
@@ -192,7 +197,7 @@ private fun ScanCamera(onCode: (String) -> Unit, onLabel: (Uri) -> Unit, onGalle
             drawRoundRect(Color.Transparent, tl, Size(w, h), CornerRadius(24f, 24f), blendMode = BlendMode.Clear)
             drawRoundRect(Color.White, tl, Size(w, h), CornerRadius(24f, 24f), style = Stroke(2.dp.toPx()))
         }
-        Text("Barcode in den Rahmen halten –\noder Etikett anvisieren und auslösen", color = Color.White, textAlign = TextAlign.Center,
+        Text("Barcode oder QR-Code in den Rahmen halten –\noder Etikett anvisieren und auslösen", color = Color.White, textAlign = TextAlign.Center,
             modifier = Modifier.align(Alignment.TopCenter).padding(top = 16.dp))
         TextButton(onClick = { torch = !torch; controller.enableTorch(torch) },
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 56.dp, end = 8.dp)) {
@@ -234,7 +239,7 @@ private fun ManualEan(modifier: Modifier, onManual: () -> Unit, onEan: (String) 
                 Spacer(Modifier.width(8.dp))
                 Button(enabled = text.length >= 8, onClick = { onEan(text); text = "" }) { Text("Suchen") }
             }
-            TextButton(onClick = onManual) { Text("Kein Barcode? Wein von Hand anlegen") }
+            TextButton(onClick = onManual) { Text("Kein Barcode? Mit Fotos anlegen") }
         }
     }
 }
@@ -251,14 +256,14 @@ private fun ScanSheet(
 ) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), tonalElevation = 3.dp) {
         Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
-            Text(if (hit.isLabel) "Etikett" else "EAN ${hit.ean}", style = MaterialTheme.typography.labelLarge,
+            Text(when { hit.isLabel -> "Etikett"; hit.qr != null -> "QR-Code · ${hit.qr}"; else -> "EAN ${hit.ean}" }, maxLines = 2, style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             when {
                 hit.searching -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (hit.isLabel) "Lese Etikett …" else "Suche online …")
+                    Text(when { hit.isLabel -> "Lese Etikett …"; hit.qr != null -> "Lese E-Label-Seite …"; else -> "Suche online …" })
                 }
                 hit.label != null -> hit.label.let { l ->
                     Text(l.name.ifBlank { l.producer.ifBlank { "Name nicht erkannt" } }, style = MaterialTheme.typography.titleMedium)
@@ -295,7 +300,7 @@ private fun ScanSheet(
                 hit.local.forEach { w ->
                     val stock = stockOf(w)
                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        WineImage(w.imageUrl, w.color, 36.dp)
+                        WineThumb(w, 36.dp)
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("${w.name} ${w.vintageLabel}", style = MaterialTheme.typography.bodyLarge)
@@ -309,7 +314,7 @@ private fun ScanSheet(
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onNew) { Text(if (hit.local.isEmpty() || hit.isLabel) "Anlegen" else "Anderer Jahrgang") }
-                OutlinedButton(onClick = onWeb) { Text("Im Web suchen") }
+                OutlinedButton(onClick = onWeb) { Text(if (hit.qr?.startsWith("http", true) == true) "Seite öffnen" else "Im Web suchen") }
             }
             TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) { Text("Weiter scannen") }
         }

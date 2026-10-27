@@ -23,6 +23,7 @@ object Listing {
             w.grape.takeIf { it.isNotBlank() }?.let { "Rebsorte: $it" },
             listOf(w.region, w.country).filter { it.isNotBlank() }.joinToString(", ").takeIf { it.isNotBlank() }?.let { "Herkunft: $it" },
             w.color.takeIf { it.isNotBlank() }?.let { "Farbe: $it" },
+            w.rating.takeIf { it.isNotBlank() }?.let { "Bewertung: $it" },
             volume.takeIf { it.isNotBlank() }?.let { "Füllmenge: $it" },
             alcohol.takeIf { it.isNotBlank() }?.let { "Alkohol: $it % vol" },
         )

@@ -57,6 +57,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -74,7 +75,11 @@ import de.robin.wein.AppViewModel
 import de.robin.wein.Phase
 import de.robin.wein.ScanHit
 import de.robin.wein.XLSX_MIME
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import de.robin.wein.core.MoveKind
+import de.robin.wein.core.QrCode
 import de.robin.wein.core.Wine
 import kotlinx.coroutines.launch
 
@@ -89,6 +94,11 @@ private sealed interface Dlg {
 
 @Composable
 fun App(vm: AppViewModel) {
+    CompositionLocalProvider(LocalPhotoFile provides vm::photoFile) { AppBody(vm) }
+}
+
+@Composable
+private fun AppBody(vm: AppViewModel) {
     var dlg by remember { mutableStateOf<Dlg>(Dlg.None) }
     val createLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(XLSX_MIME)) { uri ->
         if (uri != null) vm.createLocal(uri)
@@ -125,8 +135,9 @@ fun App(vm: AppViewModel) {
             initial = d.wine,
             ean = d.hit?.ean ?: d.wine?.ean.orEmpty(),
             online = d.hit?.online.orEmpty(),
-            onReadLabel = { vm.readLabel(it) },
-            onAskAi = if (vm.hasAi) vm::askAi else null,
+            onImportPhoto = vm::importPhoto,
+            onAutoRead = vm::autoRead,
+            canAi = vm.hasAi,
             onSave = { w ->
                 vm.saveWine(w, replacingKey = d.wine?.key)
                 vm.closeScan()
@@ -134,6 +145,7 @@ fun App(vm: AppViewModel) {
                 dlg = if (d.wine == null) Dlg.Book(w.key, MoveKind.BUY) else Dlg.None
             },
             onDismiss = { if (dlg == d) dlg = Dlg.None },
+            initialQr = d.hit?.qr,
             initialLabel = d.hit?.label,
             initialPhoto = d.hit?.photo,
         )
@@ -233,7 +245,7 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
                     else if (vm.unsaved > 0) FilledTonalButton(onClick = { vm.save() }) { Text("Speichern (${vm.unsaved})") }
                     IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Menü") }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Wein von Hand anlegen …") }, onClick = { menu = false; a.editWine(null, null) })
+                        DropdownMenuItem(text = { Text("Wein ohne Barcode anlegen …") }, onClick = { menu = false; a.editWine(null, null) })
                         HorizontalDivider()
                         if (vm.isNas) DropdownMenuItem(text = { Text("Vom NAS neu laden") }, onClick = { menu = false; vm.reload() })
                         DropdownMenuItem(text = { Text(if (vm.isNas) "NAS-Einstellungen …" else "Auf NAS umstellen …") }, onClick = { menu = false; a.nas() })
@@ -260,7 +272,7 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
                 // Wein ganz ohne Barcode von Hand eintragen
                 ExtendedFloatingActionButton(
                     onClick = { a.editWine(null, null) },
-                    icon = { Icon(Icons.Filled.Edit, null) }, text = { Text("Von Hand") },
+                    icon = { Icon(Icons.Filled.Edit, null) }, text = { Text("Ohne Barcode") },
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                 )
                 FloatingActionButton(onClick = { tab = 1 }) { Icon(Icons.Filled.Add, "Wein scannen") }
@@ -314,7 +326,7 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
         }
         if (list.isEmpty()) {
             Text(
-                if (cellar.wines.isEmpty()) "Noch keine Weine. Unten rechts auf + tippen und den ersten Barcode scannen – oder „Von Hand“ für Weine ohne Barcode."
+                if (cellar.wines.isEmpty()) "Noch keine Weine. Unten rechts auf + tippen und den ersten Barcode scannen – oder „Ohne Barcode“: Fotos machen und Daten selbst eintragen oder einlesen lassen."
                 else "Nichts gefunden.",
                 Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -326,7 +338,7 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
                     Modifier.fillMaxWidth().clickable { onOpen(w.key) }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    WineImage(w.imageUrl, w.color, 40.dp)
+                    WineThumb(w, 40.dp)
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(w.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -359,7 +371,9 @@ private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () ->
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
         item {
-            if (w.imageUrl.isNotBlank()) {
+            if (w.photos.isNotEmpty()) {
+                Box(Modifier.padding(bottom = 12.dp)) { PhotoStrip(w.photos, 180.dp) }
+            } else if (w.imageUrl.isNotBlank()) {
                 Box(Modifier.fillMaxWidth().padding(bottom = 12.dp), contentAlignment = Alignment.Center) {
                     WineImage(w.imageUrl, w.color, 180.dp)
                 }
@@ -372,6 +386,11 @@ private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () ->
             }
             Text(listOf(w.producer, w.vintageLabel, w.grape, w.region, w.country).filter { it.isNotBlank() }.joinToString(" · "),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            QrCode.url(w.qr)?.let { link ->
+                val ctx = LocalContext.current
+                TextButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) } }) { Text("E-Label öffnen") }
+            }
+            if (w.rating.isNotBlank()) Text("Bewertung: ${w.rating}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
             if (w.note.isNotBlank()) Text(w.note, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
             Text("EAN ${w.ean}" + (if (w.source.isNotBlank()) " · Daten: ${w.source}" else ""),
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))

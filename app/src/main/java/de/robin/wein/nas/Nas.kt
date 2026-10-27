@@ -38,6 +38,8 @@ data class NasConfig(
     val path: String get() = parts().drop(2).joinToString("\\")
     val fileName: String get() = parts().lastOrNull().orEmpty()
     val id: String get() = "nas://$host/$share/$path"
+    /** Ordner für die eigenen Weinfotos, neben der Weinliste. */
+    val photoDir: String get() = (parts().drop(2).dropLast(1) + PHOTO_DIR).joinToString("\\")
 
     fun isValid() = host.isNotBlank() && share.isNotBlank() && path.isNotBlank()
 
@@ -48,6 +50,8 @@ data class NasConfig(
         .split('/')
         .filter { it.isNotBlank() }
 }
+
+const val PHOTO_DIR = "Weinkeller-Fotos"
 
 class NasConflictException : Exception("Die Datei wurde inzwischen auf dem NAS geändert")
 
@@ -125,6 +129,39 @@ object Nas {
                 lastWrite(disk, path)
             }
         }
+
+    // ---------- Fotos ----------
+
+    /** Fotos, die schon im Foto-Ordner auf dem NAS liegen (leer, wenn es den Ordner noch nicht gibt). */
+    suspend fun listPhotos(cfg: NasConfig): Set<String> = withContext(Dispatchers.IO) {
+        withShare(cfg) { disk ->
+            if (!disk.folderExists(cfg.photoDir)) emptySet()
+            else disk.list(cfg.photoDir).map { it.fileName }.filter { it != "." && it != ".." }.toSet()
+        }
+    }
+
+    suspend fun readPhoto(cfg: NasConfig, name: String): ByteArray = withContext(Dispatchers.IO) {
+        withShare(cfg) { disk ->
+            disk.openFile(
+                "${cfg.photoDir}\\$name", EnumSet.of(AccessMask.GENERIC_READ), null, SMB2ShareAccess.ALL,
+                SMB2CreateDisposition.FILE_OPEN, null,
+            ).use { f -> f.inputStream.use { it.readBytes() } }
+        }
+    }
+
+    /** Lädt mehrere Fotos in einer Verbindung hoch; legt den Ordner bei Bedarf an. */
+    suspend fun writePhotos(cfg: NasConfig, photos: Map<String, ByteArray>) = withContext(Dispatchers.IO) {
+        if (photos.isEmpty()) return@withContext
+        withShare(cfg) { disk ->
+            if (!disk.folderExists(cfg.photoDir)) disk.mkdir(cfg.photoDir)
+            photos.forEach { (name, bytes) ->
+                disk.openFile(
+                    "${cfg.photoDir}\\$name", EnumSet.of(AccessMask.GENERIC_WRITE), null, SMB2ShareAccess.ALL,
+                    SMB2CreateDisposition.FILE_OVERWRITE_IF, null,
+                ).use { f -> f.outputStream.use { it.write(bytes) } }
+            }
+        }
+    }
 
     private fun lastWrite(disk: DiskShare, path: String): Long =
         disk.getFileInformation(path).basicInformation.lastWriteTime.toEpochMillis()
