@@ -19,6 +19,10 @@ data class Wine(
     val note: String = "",
     val source: String = "",        // woher die Stammdaten kamen (Open Food Facts, manuell …)
     val imageUrl: String = "",      // Flaschenbild aus der Online-Suche (wird auf dem Gerät zwischengespeichert)
+    /** Bewertungen, frei als Text (z. B. „Parker 95, Falstaff 93, eigene ★★★★“). */
+    val rating: String = "",
+    /** Eigene Fotos (Dateinamen im Foto-Ordner) – für Weine ohne Barcode oder ohne Online-Treffer. */
+    val photos: List<String> = emptyList(),
     /** Spalten, die jemand in Excel selbst ergänzt hat – werden unverändert mitgeschrieben. */
     val extra: Map<String, String> = emptyMap(),
 ) {
@@ -233,7 +237,7 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
         const val SHEET_WINES = "Weine"
         const val SHEET_MOVES = "Bewegungen"
         private val WINE_COLS = listOf("Schlüssel", "EAN", "Jahrgang", "Name", "Weingut", "Land", "Region", "Rebsorte", "Farbe", "Notiz", "Quelle",
-            "Bestand", "Ø Einkauf", "Verkauft", "Umsatz Verkauf", "Gewinn", "Bild")
+            "Bestand", "Ø Einkauf", "Verkauft", "Umsatz Verkauf", "Gewinn", "Bild", "Fotos", "Bewertung")
         private val MOVE_COLS = listOf("Datum", "Schlüssel", "EAN", "Jahrgang", "Art", "Menge", "Preis/Flasche", "Summe", "Name", "Notiz", "Gewinn")
         const val SHEET_REPORT = "Auswertung"
         private val EXCEL_EPOCH: LocalDate = LocalDate.of(1899, 12, 30)
@@ -261,6 +265,8 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
                     producer = get(r, "Weingut"), country = get(r, "Land"), region = get(r, "Region"),
                     grape = get(r, "Rebsorte"), color = get(r, "Farbe"), note = get(r, "Notiz"), source = get(r, "Quelle"),
                     imageUrl = get(r, "Bild"),
+                    photos = get(r, "Fotos").split(';').map { it.trim() }.filter { it.isNotEmpty() },
+                    rating = get(r, "Bewertung"),
                     extra = extraCols.entries.associate { (letter, title) -> title.trim() to r[letter].orEmpty() },
                 )
             }
@@ -345,12 +351,12 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
                     .append(fx("N$r", "SUMIFS(${m}\$F:\$F,${m}\$B:\$B,\$A$r,${m}\$E:\$E,\"Verkauf\")"))
                     .append(fx("O$r", "SUMIFS(${m}\$H:\$H,${m}\$B:\$B,\$A$r,${m}\$E:\$E,\"Verkauf\")", 3))
                 c.stats(x.key).profit?.let { w.append(num("P$r", it.toString(), 3)) }
-                w.append(str("Q$r", x.imageUrl))
+                w.append(str("Q$r", x.imageUrl)).append(str("R$r", x.photos.joinToString(";"))).append(str("S$r", x.rating))
                 extraTitles.forEachIndexed { j, t -> x.extra[t]?.takeIf { it.isNotEmpty() }?.let { w.append(str("${colName(WINE_COLS.size + j)}$r", it)) } }
                 w.append("</row>")
             }
             put("xl/worksheets/sheet1.xml", sheet(w, "A1:${colName(titles.size - 1)}${c.wines.size + 1}",
-                listOf(22, 15, 9, 34, 22, 12, 16, 16, 9, 24, 16, 9, 11, 9, 14, 11, 30) + extraTitles.map { 16 }))
+                listOf(22, 15, 9, 34, 22, 12, 16, 16, 9, 24, 16, 9, 11, 9, 14, 11, 30, 30, 24) + extraTitles.map { 16 }))
 
             // --- Bewegungen (älteste zuerst)
             val names = c.wines.associate { it.key to it.name }

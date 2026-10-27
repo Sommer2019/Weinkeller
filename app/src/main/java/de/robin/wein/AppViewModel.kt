@@ -2,6 +2,10 @@ package de.robin.wein
 
 import android.app.Application
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.runtime.getValue
@@ -27,6 +31,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 const val XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -42,6 +47,9 @@ sealed interface Source {
     data class Local(val uri: Uri) : Source { override val id get() = "local:$uri" }
     data class Network(val cfg: NasConfig) : Source { override val id get() = cfg.id }
 }
+
+/** Ergebnis von „Automatisch einlesen“: Texterkennung der Fotos und/oder KI-Recherche. */
+data class AutoRead(val label: LabelResult?, val ai: LookupResult?, val error: String?)
 
 /** Was nach einem Scan angezeigt wird – per Barcode (ean) oder per Etikett-Foto (ean leer, label/photo gesetzt). */
 data class ScanHit(
@@ -316,11 +324,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val hasAi: Boolean get() = activeConfig().geminiKey.isNotBlank()
 
     /** KI-Recherche per Knopf: EAN und/oder Etikett-Foto. Fehlertext statt Exception. */
-    suspend fun askAi(ean: String?, label: Uri?): Pair<LookupResult?, String?> {
+    suspend fun askAi(ean: String?, labels: List<Uri>): Pair<LookupResult?, String?> {
         val key = activeConfig().geminiKey
         if (key.isBlank()) return null to "Kein Gemini-Schlüssel eingetragen (Menü → Online-Quellen)"
         return try {
-            val r = de.robin.wein.lookup.GeminiLookup.ask(getApplication(), key, ean?.takeIf { !it.startsWith("X") }, label)
+            val r = de.robin.wein.lookup.GeminiLookup.ask(getApplication(), key, ean?.takeIf { !it.startsWith("X") }, labels)
             r to (if (r == null) "KI hat den Wein nicht sicher gefunden" else null)
         } catch (e: Throwable) {
             null to (e.message ?: e.toString())
@@ -330,6 +338,96 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Etikett-Foto lesen (offline). */
     suspend fun readLabel(uri: Uri): LabelResult? =
         runCatching { LabelOcr.read(getApplication(), uri) }.getOrNull()
+
+    /**
+     * „Automatisch einlesen“: Texterkennung auf allen Fotos (offline), dazu – falls eingerichtet – die KI-Recherche
+     * mit EAN und Fotos. Füllt im Dialog nur leere Felder.
+     */
+    suspend fun autoRead(ean: String?, photos: List<String>): AutoRead {
+        val files = photos.mapNotNull { photoFile(it) }
+        val labels = files.mapNotNull { readLabel(Uri.fromFile(it)) }
+        // Das Foto mit dem meisten erkannten Inhalt gewinnt; Jahreszahlen aller Fotos zur Auswahl
+        val label = labels.maxByOrNull { l -> listOf(l.name, l.producer, l.grape, l.region).count { it.isNotBlank() } + (if (l.vintage != null) 1 else 0) }
+            ?.let { best -> best.copy(years = labels.flatMap { it.years }.distinct().sortedDescending()) }
+        val canAi = hasAi && (files.isNotEmpty() || !ean.isNullOrBlank())
+        val (ai, aiError) = if (canAi) askAi(ean, files.take(3).map { Uri.fromFile(it) }) else null to null
+        val error = when {
+            label != null || ai != null -> null
+            files.isEmpty() && !canAi -> "Erst ein Foto machen"
+            else -> listOfNotNull("Nichts erkannt – Etikett gerade und formatfüllend fotografieren", aiError).joinToString(" · ")
+        }
+        return AutoRead(label, ai, error)
+    }
+
+    // ------------------------------------------------------------ Eigene Fotos
+
+    /** Fotos liegen im App-Speicher; bei einer Weinliste auf dem NAS zusätzlich im Ordner „Weinkeller-Fotos“ daneben. */
+    private val photoDir get() = File(getApplication<Application>().filesDir, "fotos").apply { mkdirs() }
+    private val photoMissing = HashSet<String>()
+
+    /** Foto übernehmen: gedreht wie aufgenommen, auf max. 1600 px verkleinert, als JPEG. Liefert den Dateinamen. */
+    suspend fun importPhoto(uri: Uri): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val resolver = getApplication<Application>().contentResolver
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            resolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 1600) sample *= 2
+            var bmp = resolver.openInputStream(uri)?.use {
+                BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+            } ?: return@runCatching null
+            val orientation = resolver.openInputStream(uri)?.use {
+                ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            } ?: ExifInterface.ORIENTATION_NORMAL
+            val rotation = when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> 90
+                ExifInterface.ORIENTATION_ROTATE_180 -> 180
+                ExifInterface.ORIENTATION_ROTATE_270 -> 270
+                else -> 0
+            }
+            if (rotation != 0) {
+                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(rotation.toFloat()) }, true)
+            }
+            val scale = minOf(1f, 1600f / maxOf(bmp.width, bmp.height))
+            if (scale < 1f) bmp = Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
+            val out = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            val name = newPhotoName()
+            File(photoDir, name).writeBytes(out.toByteArray())
+            name
+        }.getOrNull()
+    }
+
+    /** Foto auf dem Gerät – fehlt es (am anderen Gerät aufgenommen), wird es vom NAS geholt. */
+    suspend fun photoFile(name: String): File? {
+        val f = File(photoDir, name)
+        if (f.exists()) return f
+        val cfg = (source as? Source.Network)?.cfg ?: return null
+        if (name in photoMissing) return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val tmp = File(photoDir, "$name.tmp")
+                tmp.writeBytes(Nas.readPhoto(cfg, name))
+                tmp.renameTo(f)
+                f
+            }.getOrElse { photoMissing += name; null }
+        }
+    }
+
+    /** Fotos, die das NAS noch nicht hat, hochladen. Fehler stören das Speichern der Liste nicht. */
+    private suspend fun uploadPhotos(cfg: NasConfig) {
+        val wanted = cellar.wines.flatMap { it.photos }.toSet()
+        if (wanted.isEmpty()) return
+        runCatching {
+            val there = Nas.listPhotos(cfg)
+            val missing = wanted.filter { it !in there }.mapNotNull { n -> File(photoDir, n).takeIf { it.exists() }?.let { n to it.readBytes() } }
+            Nas.writePhotos(cfg, missing.toMap())
+        }.onFailure { _events.tryEmit("Fotos nicht aufs NAS geladen: ${it.message ?: it} – nächstes Speichern versucht es erneut") }
+    }
+
+    private fun newPhotoName() =
+        "foto-" + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) +
+            "-" + java.util.UUID.randomUUID().toString().take(6) + ".jpg"
 
     fun webSearchIntent(query: String): Intent =
         Intent(Intent.ACTION_VIEW, Uri.parse(EanLookup.webSearchUrl(query)))
@@ -350,6 +448,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         cacheFile().writeBytes(bytes)
                         prefs.edit().putLong(KEY_BASE_WRITE, lw).apply()
                         offline = false
+                        uploadPhotos(src.cfg)
                     }
                 }
                 unsaved = 0

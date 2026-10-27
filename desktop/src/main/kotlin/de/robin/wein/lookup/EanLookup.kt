@@ -54,7 +54,7 @@ object EanLookup {
             {
                 if (cfg.geminiKey.isBlank()) null
                 // Fehler der KI (Schlüssel, Kontingent …) melden statt still zu schlucken
-                else runCatching { GeminiLookup.ask(cfg.geminiKey, ean, null) }
+                else runCatching { GeminiLookup.ask(cfg.geminiKey, ean, emptyList()) }
                     .onFailure { onAiError((it as? GeminiLookup.GeminiException)?.message ?: "KI-Recherche fehlgeschlagen") }
                     .getOrNull()
             },

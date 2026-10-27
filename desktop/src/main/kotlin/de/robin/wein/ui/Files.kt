@@ -24,7 +24,16 @@ fun chooseExcelToOpen(): File? = dialog("Weinliste öffnen", FileDialog.LOAD, nu
 fun chooseExcelToCreate(): File? = dialog("Neue Weinliste anlegen", FileDialog.SAVE, "Weine.xlsx")
     ?.let { if (it.extension.equals("xlsx", true) || it.extension.equals("xlsm", true)) it else File(it.path + ".xlsx") }
 
-fun chooseImage(): File? = dialog("Etikett-Foto wählen", FileDialog.LOAD, null, "jpg", "jpeg", "png", "bmp", "gif")
+/** Mehrere Fotos auf einmal wählen (Strg/Umschalt im Windows-Dialog). */
+fun chooseImages(): List<File> {
+    val ext = listOf("jpg", "jpeg", "png", "bmp", "gif")
+    val d = FileDialog(mainFrame, "Fotos hinzufügen", FileDialog.LOAD)
+    d.isMultipleMode = true
+    d.file = ext.joinToString(";") { "*.$it" }
+    d.setFilenameFilter { _, name -> ext.any { name.endsWith(".$it", ignoreCase = true) } }
+    d.isVisible = true
+    return d.files.orEmpty().toList()
+}
 
 fun copyToClipboard(text: String) {
     runCatching { Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null) }

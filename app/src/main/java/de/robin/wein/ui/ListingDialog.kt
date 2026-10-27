@@ -115,7 +115,7 @@ fun ListingDialog(wine: Wine, stats: Stats, onDismiss: () -> Unit) {
                 if (titleEdited != null || textEdited != null) {
                     TextButton(onClick = { titleEdited = null; textEdited = null }) { Text("Text neu erzeugen") }
                 }
-                Text("Titel, Preis und Text landen in der Zwischenablage, das Flaschenbild in der Galerie (Ordner „Weinkeller“). " +
+                Text("Titel, Preis und Text landen in der Zwischenablage, die Fotos in der Galerie (Ordner „Weinkeller“). " +
                     "In der App dann nur noch einfügen und das Bild auswählen.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(12.dp))
@@ -138,35 +138,43 @@ private fun open(ctx: Context, pkg: String, url: String, imageSaved: Boolean) {
     runCatching { ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
 
-/** Flaschenbild in die Galerie legen, damit es im Foto-Auswahldialog der Verkaufs-App auftaucht. */
+/** Bilder für die Anzeige: eigene Fotos (sofern auf dem Gerät), sonst das Online-Bild. */
+private fun listingImages(ctx: Context, wine: Wine): List<java.io.File> =
+    wine.photos.map { java.io.File(ctx.filesDir, "fotos/$it") }.filter { it.exists() }.take(6)
+        .ifEmpty { listOfNotNull(ImageCache.cachedFile(ctx, wine.imageUrl)) }
+
+/** Bilder in die Galerie legen, damit sie im Foto-Auswahldialog der Verkaufs-App auftauchen. */
 private fun saveImageToGallery(ctx: Context, wine: Wine): Boolean {
-    val f = ImageCache.cachedFile(ctx, wine.imageUrl) ?: return false
+    val files = listingImages(ctx, wine)
+    if (files.isEmpty()) return false
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false   // ältere Androids bräuchten Speicher-Berechtigung
     return runCatching {
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, "${wine.name} ${wine.vintageLabel}.jpg".replace('/', '-'))
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Weinkeller")
+        files.forEachIndexed { i, f ->
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, ("${wine.name} ${wine.vintageLabel}" + (if (i > 0) " ${i + 1}" else "") + ".jpg").replace('/', '-'))
+                put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Weinkeller")
+            }
+            val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+            ctx.contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
         }
-        val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-        ctx.contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
         true
     }.getOrDefault(false)
 }
 
 private fun share(ctx: Context, wine: Wine, title: String, text: String) {
-    val img = ImageCache.cachedFile(ctx, wine.imageUrl)
-    val intent = Intent(Intent.ACTION_SEND).apply {
+    val uris = ArrayList(listingImages(ctx, wine).map { FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", it) })
+    val intent = Intent(if (uris.size > 1) Intent.ACTION_SEND_MULTIPLE else Intent.ACTION_SEND).apply {
         putExtra(Intent.EXTRA_SUBJECT, title)
         putExtra(Intent.EXTRA_TEXT, "$title\n\n$text")
-        if (img != null) {
-            val uri = FileProvider.getUriForFile(ctx, "${ctx.packageName}.files", img)
-            type = "image/*"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = ClipData.newRawUri("Bild", uri)
+        when {
+            uris.size > 1 -> { type = "image/*"; putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris) }
+            uris.size == 1 -> { type = "image/*"; putExtra(Intent.EXTRA_STREAM, uris[0]) }
+            else -> type = "text/plain"
+        }
+        uris.firstOrNull()?.let { first ->
+            clipData = ClipData.newRawUri("Bild", first).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        } else {
-            type = "text/plain"
         }
     }
     ctx.startActivity(Intent.createChooser(intent, "Anzeige teilen"))

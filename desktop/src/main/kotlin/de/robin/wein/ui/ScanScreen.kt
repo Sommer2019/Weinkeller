@@ -76,7 +76,7 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
                 )
                 TextButton(onClick = { onAction(ScanAction.Manual) }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
-                    Text("Kein Barcode? Wein von Hand anlegen")
+                    Text("Kein Barcode? Mit Fotos anlegen")
                 }
             } else {
                 ScanSheet(
@@ -158,7 +158,7 @@ private fun ScanSheet(
                 hit.local.forEach { w ->
                     val stock = stockOf(w)
                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        WineImage(w.imageUrl, w.color, 36.dp)
+                        WineThumb(w, 36.dp)
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("${w.name} ${w.vintageLabel}", style = MaterialTheme.typography.bodyLarge)

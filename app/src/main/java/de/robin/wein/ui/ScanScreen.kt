@@ -234,7 +234,7 @@ private fun ManualEan(modifier: Modifier, onManual: () -> Unit, onEan: (String) 
                 Spacer(Modifier.width(8.dp))
                 Button(enabled = text.length >= 8, onClick = { onEan(text); text = "" }) { Text("Suchen") }
             }
-            TextButton(onClick = onManual) { Text("Kein Barcode? Wein von Hand anlegen") }
+            TextButton(onClick = onManual) { Text("Kein Barcode? Mit Fotos anlegen") }
         }
     }
 }
@@ -295,7 +295,7 @@ private fun ScanSheet(
                 hit.local.forEach { w ->
                     val stock = stockOf(w)
                     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        WineImage(w.imageUrl, w.color, 36.dp)
+                        WineThumb(w, 36.dp)
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("${w.name} ${w.vintageLabel}", style = MaterialTheme.typography.bodyLarge)

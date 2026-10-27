@@ -2,4 +2,5 @@
 <paths>
     <cache-path name="etiketten" path="etiketten/" />
     <files-path name="bilder" path="bilder/" />
+    <files-path name="fotos" path="fotos/" />
 </paths>

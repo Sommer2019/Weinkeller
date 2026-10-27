@@ -34,22 +34,22 @@ object GeminiLookup {
      * Erst mit Google-Suche; ist die im Kontingent des Schlüssels nicht (mehr) drin (429),
      * noch einmal ohne Suche – dann nur Modellwissen bzw. das Etikett-Foto.
      */
-    suspend fun ask(ctx: Context, key: String, ean: String?, label: Uri?): LookupResult? = withContext(Dispatchers.IO) {
-        val image = label?.let { jpegBase64(ctx, it) }
+    suspend fun ask(ctx: Context, key: String, ean: String?, labels: List<Uri>): LookupResult? = withContext(Dispatchers.IO) {
+        val images = labels.mapNotNull { jpegBase64(ctx, it) }
         val response = try {
-            request(key, ean, image, search = true)
+            request(key, ean, images, search = true)
         } catch (e: QuotaException) {
-            request(key, ean, image, search = false)
+            request(key, ean, images, search = false)
         }
         parse(response)
     }
 
     private class QuotaException : Exception()
 
-    private fun request(key: String, ean: String?, image: String?, search: Boolean): String {
+    private fun request(key: String, ean: String?, images: List<String>, search: Boolean): String {
         val parts = JSONArray()
-        parts.put(JSONObject().put("text", prompt(ean, image != null, search)))
-        image?.let { b64 ->
+        parts.put(JSONObject().put("text", prompt(ean, images.isNotEmpty(), search)))
+        images.forEach { b64 ->
             parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
         }
         val body = JSONObject()
@@ -80,9 +80,10 @@ object GeminiLookup {
 
     private fun prompt(ean: String?, withImage: Boolean, search: Boolean) = buildString {
         append("Du bestimmst einen Wein für eine private Kellerliste.")
+        if (ean == null && withImage && search) append(" Suche bei Bedarf im Web nach dem, was auf dem Etikett steht (Weingut, Lage, Cuvée).")
         if (ean != null) append(" Die Flasche hat die EAN/GTIN $ean." +
             if (search) " Suche im Web nach genau dieser Nummer (Händler, Weingüter, Shops)." else " Eine Websuche steht nicht zur Verfügung.")
-        if (withImage) append(" Das Foto zeigt das Etikett – lies Name, Weingut und Jahrgang davon ab.")
+        if (withImage) append(" Die Fotos zeigen die Flasche bzw. ihr Etikett (vorne/hinten) – lies Name, Weingut, Jahrgang, Rebsorte und Herkunft davon ab.")
         append(" Antworte NUR mit einem JSON-Objekt, ohne weiteren Text, in dieser Form: ")
         append("""{"gefunden":true,"name":"","weingut":"","jahrgang":null,"land":"","region":"","rebsorte":"","farbe":"","alkohol":"","sicher":"hoch|mittel|niedrig"}""")
         append(". farbe ist eine von: Rot, Weiß, Rosé, Schaumwein oder leer. name ohne Weingut und ohne Jahrgang, aber mit Prädikat/Stil (z. B. \"Riesling Spätlese trocken\").")
