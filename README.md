@@ -24,6 +24,13 @@ Die EAN bleibt dann leer, die App vergibt intern eine eigene Nummer.
 
 Dieselbe EAN gilt oft für mehrere Jahrgänge – ein Wein ist deshalb immer EAN + Jahrgang.
 
+**QR-Code** (seit Dez. 2023 meist das E-Label mit Zutaten/Nährwerten): einfach wie einen Barcode scannen.
+- Steckt eine GTIN drin (GS1-Link `…/01/<Nummer>`), läuft alles wie beim Barcode.
+- Sonst ist es ein Link: Die App lädt die E-Label-Seite und schlägt Name, Weingut, Jahrgang … vor
+  (mit Gemini-Schlüssel liest die KI die Seite, sonst nur der Seitentitel). Beim Anlegen wird der Link gespeichert
+  (Spalte „QR-Code“) – der nächste Scan findet den Wein dann direkt. In den Details: „E-Label öffnen“.
+- Am PC braucht es für QR-Codes einen 2D-Handscanner (der tippt den Link ins Feld) – oder den Link einfügen.
+
 ## Online-Quellen & Etikett
 Reihenfolge der Suche: Open Food Facts → UPCitemdb → KI-Recherche (optional) → EAN-Search (optional, kostenpflichtig).
 Menü → „Online-Quellen“:

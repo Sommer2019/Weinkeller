@@ -75,7 +75,11 @@ import de.robin.wein.AppViewModel
 import de.robin.wein.Phase
 import de.robin.wein.ScanHit
 import de.robin.wein.XLSX_MIME
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.ui.platform.LocalContext
 import de.robin.wein.core.MoveKind
+import de.robin.wein.core.QrCode
 import de.robin.wein.core.Wine
 import kotlinx.coroutines.launch
 
@@ -141,6 +145,7 @@ private fun AppBody(vm: AppViewModel) {
                 dlg = if (d.wine == null) Dlg.Book(w.key, MoveKind.BUY) else Dlg.None
             },
             onDismiss = { if (dlg == d) dlg = Dlg.None },
+            initialQr = d.hit?.qr,
             initialLabel = d.hit?.label,
             initialPhoto = d.hit?.photo,
         )
@@ -381,6 +386,10 @@ private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () ->
             }
             Text(listOf(w.producer, w.vintageLabel, w.grape, w.region, w.country).filter { it.isNotBlank() }.joinToString(" · "),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            QrCode.url(w.qr)?.let { link ->
+                val ctx = LocalContext.current
+                TextButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) } }) { Text("E-Label öffnen") }
+            }
             if (w.rating.isNotBlank()) Text("Bewertung: ${w.rating}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
             if (w.note.isNotBlank()) Text(w.note, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
             Text("EAN ${w.ean}" + (if (w.source.isNotBlank()) " · Daten: ${w.source}" else ""),

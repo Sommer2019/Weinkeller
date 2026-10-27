@@ -48,6 +48,8 @@ import androidx.compose.ui.unit.dp
 import de.robin.wein.AppViewModel
 import de.robin.wein.ScanHit
 import de.robin.wein.core.MoveKind
+import de.robin.wein.core.QrCode
+import de.robin.wein.openUrl
 import de.robin.wein.core.Wine
 
 /** Was der Scan-Tab als Nächstes öffnen möchte. */
@@ -66,12 +68,13 @@ sealed interface ScanAction {
 fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Column(Modifier.widthIn(max = 640.dp).fillMaxWidth()) {
-            EanInput { vm.onBarcode(it) }
+            EanInput { vm.onCode(it) }
             Spacer(Modifier.height(16.dp))
             val hit = vm.scan
             if (hit == null) {
                 Text(
-                    "Barcode mit dem Handscanner einlesen oder die Nummer unter dem Strichcode eintippen und Enter drücken.",
+                    "Barcode oder QR-Code mit dem Handscanner einlesen (für QR-Codes braucht es einen 2D-Scanner) – " +
+                        "oder die Nummer unter dem Strichcode eintippen und Enter drücken.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
                 )
@@ -84,7 +87,7 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
                     stockOf = { vm.cellar.stats(it.key).stock },
                     onBook = { w, k -> onAction(ScanAction.Book(w, k)) },
                     onNew = { onAction(ScanAction.NewWine(hit)) },
-                    onWeb = { vm.openWebSearch(hit.ean) },
+                    onWeb = { hit.qr?.let(QrCode::url)?.let(::openUrl) ?: vm.openWebSearch(hit.ean) },
                     onClose = { vm.closeScan() },
                     modifier = Modifier,
                 )
@@ -98,19 +101,20 @@ private fun EanInput(onEan: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
-    fun submit() { if (text.length >= 8) { onEan(text); text = "" } }
+    fun submit() { if (text.trim().length >= 8) { onEan(text.trim()); text = "" } }
     Row(verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
-            text, { v -> text = v.filter { it.isDigit() }.take(14) },
+            // 2D-Handscanner tippen beim QR-Code den ganzen Link
+            text, { v -> text = v.take(500) },
             Modifier.weight(1f).focusRequester(focus).onPreviewKeyEvent {
                 if (it.type == KeyEventType.KeyDown && (it.key == Key.Enter || it.key == Key.NumPadEnter)) { submit(); true } else false
             },
-            label = { Text("EAN scannen oder eintippen") }, singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Search),
+            label = { Text("EAN oder QR-Code scannen bzw. eintippen") }, singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
             keyboardActions = KeyboardActions(onSearch = { submit() }),
         )
         Spacer(Modifier.width(8.dp))
-        Button(enabled = text.length >= 8, onClick = { submit() }) { Text("Suchen") }
+        Button(enabled = text.trim().length >= 8, onClick = { submit() }) { Text("Suchen") }
     }
 }
 
@@ -126,13 +130,13 @@ private fun ScanSheet(
 ) {
     Surface(modifier.fillMaxWidth(), shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp), tonalElevation = 3.dp) {
         Column(Modifier.padding(20.dp).verticalScroll(rememberScrollState())) {
-            Text("EAN ${hit.ean}", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (hit.qr != null) "QR-Code · ${hit.qr}" else "EAN ${hit.ean}", maxLines = 2, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             when {
                 hit.searching -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text("Suche online …")
+                    Text(if (hit.qr != null) "Lese E-Label-Seite …" else "Suche online …")
                 }
                 hit.online.isNotEmpty() -> hit.online.first().let { r ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -172,7 +176,7 @@ private fun ScanSheet(
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onNew) { Text(if (hit.local.isEmpty()) "Anlegen" else "Anderer Jahrgang") }
-                OutlinedButton(onClick = onWeb) { Text("Im Web suchen") }
+                OutlinedButton(onClick = onWeb) { Text(if (hit.qr?.startsWith("http", true) == true) "Seite öffnen" else "Im Web suchen") }
             }
             TextButton(onClick = onClose, modifier = Modifier.align(Alignment.End)) { Text("Schließen") }
         }

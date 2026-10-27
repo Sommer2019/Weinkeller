@@ -16,6 +16,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.robin.wein.core.Cellar
 import de.robin.wein.core.Movement
+import de.robin.wein.core.QrCode
 import de.robin.wein.core.Wine
 import de.robin.wein.core.LabelResult
 import de.robin.wein.lookup.EanLookup
@@ -60,6 +61,8 @@ data class ScanHit(
     val error: String? = null,
     val label: LabelResult? = null,
     val photo: Uri? = null,
+    /** Inhalt eines QR-Codes ohne EAN (meist der E-Label-Link). */
+    val qr: String? = null,
 ) {
     val isLabel: Boolean get() = photo != null
 }
@@ -263,6 +266,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ------------------------------------------------------------ Scannen
+
+    /**
+     * Alles, was der Scanner liefert: EAN, QR-Code mit GTIN (GS1-Link) → wie ein Barcode;
+     * sonst QR-Code mit Link (E-Label) → Wein über den gespeicherten Link wiederfinden und die Seite auslesen.
+     */
+    fun onCode(raw: String) {
+        val text = raw.trim()
+        if (text.isEmpty()) return
+        QrCode.gtin(text)?.let { return onBarcode(it) }
+        if (scan?.qr == text) return
+        val url = QrCode.url(text)
+        if (url == null) {
+            scan = ScanHit(ean = "", local = cellar.byQr(text), qr = text, searching = false,
+                error = "QR-Code ohne Link und ohne EAN – Inhalt wird beim Anlegen gespeichert")
+            return
+        }
+        scan = ScanHit(ean = "", local = cellar.byQr(url), qr = url)
+        viewModelScope.launch {
+            var aiError: String? = null
+            val found = runCatching { EanLookup.lookupQr(getApplication(), url, activeConfig()) { aiError = it } }.getOrDefault(emptyList())
+            scan = scan?.takeIf { it.qr == url }?.copy(online = found, searching = false,
+                error = if (found.isEmpty()) "E-Label-Seite nicht auslesbar – bitte von Hand eintragen oder Fotos einlesen" +
+                    (aiError?.let { " ($it)" } ?: "") else null)
+        }
+    }
 
     fun onBarcode(ean: String) {
         val code = ean.filter { it.isDigit() }

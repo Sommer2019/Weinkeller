@@ -74,6 +74,7 @@ fun WineDialog(
     canAi: Boolean,
     onSave: (Wine) -> Unit,
     onDismiss: () -> Unit,
+    initialQr: String? = null,
 ) {
     val first = online.firstOrNull()
     val isNew = initial == null
@@ -86,6 +87,7 @@ fun WineDialog(
     var color by remember { mutableStateOf(initial?.color ?: first?.color.orEmpty()) }
     var note by remember { mutableStateOf(initial?.note.orEmpty()) }
     var rating by remember { mutableStateOf(initial?.rating.orEmpty()) }
+    var qr by remember { mutableStateOf(initial?.qr?.ifBlank { null } ?: initialQr.orEmpty()) }
     var vintage by remember { mutableStateOf(initial?.vintage?.toString() ?: if (isNew) first?.vintage?.toString().orEmpty() else "") }
     var noVintage by remember { mutableStateOf(initial != null && initial.vintage == null) }
     var source by remember { mutableStateOf(initial?.source ?: first?.source ?: "manuell") }
@@ -219,6 +221,8 @@ fun WineDialog(
                     label = { Text("EAN (leer = ohne Barcode)") }, singleLine = true,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 )
+                OutlinedTextField(qr, { qr = it.trim() }, Modifier.fillMaxWidth(), label = { Text("QR-Code / E-Label-Link (optional)") },
+                    singleLine = true, supportingText = { Text("Damit findet ein QR-Scan den Wein wieder.") })
             }
         },
         confirmButton = {
@@ -228,7 +232,7 @@ fun WineDialog(
                 onSave(base.copy(
                     ean = finalEan, vintage = if (noVintage) null else vintageNum, name = name.trim(),
                     producer = producer.trim(), country = country.trim(), region = region.trim(), grape = grape.trim(),
-                    color = color, note = note.trim(), rating = rating.trim(), source = source, imageUrl = imageUrl, photos = photos.toList(),
+                    color = color, note = note.trim(), rating = rating.trim(), qr = qr.trim(), source = source, imageUrl = imageUrl, photos = photos.toList(),
                 ))
                 onDismiss()
             }) { Text("Speichern") }

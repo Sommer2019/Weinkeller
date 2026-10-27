@@ -1,6 +1,7 @@
 package de.robin.wein.lookup
 
 import de.robin.wein.core.Guess
+import de.robin.wein.core.QrCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -23,6 +24,21 @@ data class LookupResult(
     val grape: String = "",
     val alcohol: String = "",       // z. B. "12,5"
 )
+
+/** Geladene E-Label-Seite hinter einem QR-Code. */
+data class QrPage(val url: String, val title: String, val text: String)
+
+/** Höchstens max Bytes lesen (readNBytes gibt es auf Android erst ab API 33). */
+internal fun java.io.InputStream.readNBytesCompat(max: Int): ByteArray {
+    val out = java.io.ByteArrayOutputStream()
+    val buf = ByteArray(8192)
+    while (out.size() < max) {
+        val n = read(buf, 0, minOf(buf.size, max - out.size()))
+        if (n < 0) break
+        out.write(buf, 0, n)
+    }
+    return out.toByteArray()
+}
 
 /** Zugangsdaten für die optionalen Quellen. */
 data class LookupConfig(
@@ -69,6 +85,27 @@ object EanLookup {
             hit = runCatching { eanSearchVendor(ean, cfg.eanSearchToken) }.getOrNull()
         }
         listOfNotNull(hit)
+    }
+
+    /**
+     * QR-Code mit Link (meist das E-Label seit 2023): Seite laden; mit Gemini-Schlüssel liest die KI Name, Weingut,
+     * Jahrgang … aus dem Seitentext, sonst wird wenigstens der Seitentitel als Name vorgeschlagen.
+     */
+    suspend fun lookupQr(
+        ctx: android.content.Context, url: String, cfg: LookupConfig = LookupConfig(),
+        onAiError: (String) -> Unit = {},
+    ): List<LookupResult> = withContext(Dispatchers.IO) {
+        val html = runCatching { getBytes(url, maxBytes = 400_000)?.toString(Charsets.UTF_8) }.getOrNull().orEmpty()
+        val page = QrPage(url, QrCode.pageTitle(html), QrCode.pageText(html))
+        val ai = if (cfg.geminiKey.isBlank()) null
+        else runCatching { GeminiLookup.ask(ctx, cfg.geminiKey, null, emptyList(), page) }
+            .onFailure { onAiError((it as? GeminiLookup.GeminiException)?.message ?: "KI-Recherche fehlgeschlagen") }
+            .getOrNull()
+        val titleOnly = page.title.takeIf { it.isNotBlank() }?.let {
+            LookupResult(source = "E-Label-Seite", name = it, color = Guess.color(it, page.text),
+                vintage = Guess.vintage(it, maxYear = year()), raw = it)
+        }
+        listOfNotNull(ai ?: titleOnly)
     }
 
     /** ean-search.org – kostenpflichtig, nur mit eigenem Token. */
@@ -174,13 +211,16 @@ object EanLookup {
 
     private fun get(url: String): String? = getBytes(url)?.toString(Charsets.UTF_8)
 
-    private fun getBytes(url: String): ByteArray? {
+    private fun getBytes(url: String, maxBytes: Int = Int.MAX_VALUE): ByteArray? {
         val c = URL(url).openConnection() as HttpURLConnection
         return try {
             c.connectTimeout = 8000
             c.readTimeout = 8000
+            c.instanceFollowRedirects = true
             c.setRequestProperty("User-Agent", UA)
-            if (c.responseCode != 200) null else c.inputStream.use { it.readBytes() }
+            if (c.responseCode != 200) null else c.inputStream.use { inp ->
+                if (maxBytes == Int.MAX_VALUE) inp.readBytes() else inp.readNBytesCompat(maxBytes)
+            }
         } catch (_: Exception) {
             null
         } finally {

@@ -34,21 +34,21 @@ object GeminiLookup {
      * Erst mit Google-Suche; ist die im Kontingent des Schlüssels nicht (mehr) drin (429),
      * noch einmal ohne Suche – dann nur Modellwissen bzw. das Etikett-Foto.
      */
-    suspend fun ask(key: String, ean: String?, labels: List<File>): LookupResult? = withContext(Dispatchers.IO) {
+    suspend fun ask(key: String, ean: String?, labels: List<File>, page: QrPage? = null): LookupResult? = withContext(Dispatchers.IO) {
         val images = labels.mapNotNull { jpegBase64(it) }
         val response = try {
-            request(key, ean, images, search = true)
+            request(key, ean, images, page, search = true)
         } catch (e: QuotaException) {
-            request(key, ean, images, search = false)
+            request(key, ean, images, page, search = false)
         }
         parse(response)
     }
 
     private class QuotaException : Exception()
 
-    private fun request(key: String, ean: String?, images: List<String>, search: Boolean): String {
+    private fun request(key: String, ean: String?, images: List<String>, page: QrPage?, search: Boolean): String {
         val parts = JSONArray()
-        parts.put(JSONObject().put("text", prompt(ean, images.isNotEmpty(), search)))
+        parts.put(JSONObject().put("text", prompt(ean, images.isNotEmpty(), page, search)))
         images.forEach { b64 ->
             parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
         }
@@ -78,8 +78,13 @@ object GeminiLookup {
         }
     }
 
-    private fun prompt(ean: String?, withImage: Boolean, search: Boolean) = buildString {
+    private fun prompt(ean: String?, withImage: Boolean, page: QrPage?, search: Boolean) = buildString {
         append("Du bestimmst einen Wein für eine private Kellerliste.")
+        if (page != null) {
+            append(" Der QR-Code auf der Flasche (E-Label) führt zu ${page.url}.")
+            if (page.text.isNotBlank()) append(" Text dieser Seite: «${page.text}».")
+            append(" Lies daraus Name, Weingut, Jahrgang, Herkunft und Rebsorte ab" + if (search) " – notfalls öffne bzw. suche die Seite im Web." else ".")
+        }
         if (ean == null && withImage && search) append(" Suche bei Bedarf im Web nach dem, was auf dem Etikett steht (Weingut, Lage, Cuvée).")
         if (ean != null) append(" Die Flasche hat die EAN/GTIN $ean." +
             if (search) " Suche im Web nach genau dieser Nummer (Händler, Weingüter, Shops)." else " Eine Websuche steht nicht zur Verfügung.")
