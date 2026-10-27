@@ -64,6 +64,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
@@ -95,10 +98,13 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
 
     val pickPhoto = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri -> uri?.let(vm::onLabelPhoto) }
     val pickGallery = { pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
+    val density = LocalDensity.current
+    var sheetHeight by remember { mutableStateOf(150.dp) }
 
     Box(Modifier.fillMaxSize()) {
         if (granted) {
-            ScanCamera(onCode = { vm.onCode(it) }, onLabel = { vm.onLabelPhoto(it) }, onGallery = pickGallery, paused = vm.scan != null)
+            ScanCamera(onCode = { vm.onCode(it) }, onLabel = { vm.onLabelPhoto(it) }, onGallery = pickGallery, paused = vm.scan != null,
+                bottomInset = sheetHeight)
         } else {
             Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Zum Scannen der Barcodes braucht die App die Kamera.", textAlign = TextAlign.Center)
@@ -110,7 +116,9 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
 
         val hit = vm.scan
         if (hit == null) {
-            ManualEan(Modifier.align(Alignment.BottomCenter), onManual = { onAction(ScanAction.Manual) }) { vm.onBarcode(it) }
+            // Höhe merken, damit Galerie/Auslöser immer darüber sitzen
+            ManualEan(Modifier.align(Alignment.BottomCenter).onSizeChanged { sheetHeight = with(density) { it.height.toDp() } },
+                onManual = { onAction(ScanAction.Manual) }) { vm.onBarcode(it) }
         } else {
             ScanSheet(
                 hit = hit,
@@ -134,7 +142,7 @@ fun ScanTab(vm: AppViewModel, onAction: (ScanAction) -> Unit) {
  * der Auslöser fotografiert das Etikett für die Texterkennung.
  */
 @Composable
-private fun ScanCamera(onCode: (String) -> Unit, onLabel: (Uri) -> Unit, onGallery: () -> Unit, paused: Boolean) {
+private fun ScanCamera(onCode: (String) -> Unit, onLabel: (Uri) -> Unit, onGallery: () -> Unit, paused: Boolean, bottomInset: Dp) {
     val ctx = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val currentOnCode by rememberUpdatedState(onCode)
@@ -204,9 +212,9 @@ private fun ScanCamera(onCode: (String) -> Unit, onLabel: (Uri) -> Unit, onGalle
             Text(if (torch) "Licht aus" else "Licht an", color = Color.White)
         }
         if (!paused) {
-            // Platz für die EAN-Eingabe unten freilassen
+            // Über der EAN-Eingabe (gemessene Höhe), nie dahinter
             Row(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = 104.dp),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(bottom = bottomInset + 16.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically,
             ) {
                 TextButton(onClick = onGallery, enabled = !capturing) { Text("Galerie", color = Color.White) }
