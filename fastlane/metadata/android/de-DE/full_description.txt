@@ -1,0 +1,31 @@
+Dein Weinkeller als Excel-Liste – gepflegt per Barcode, QR-Code oder Foto.
+
+Weinkeller führt Bestand, Einkäufe und Verkäufe deiner Weine. Die Liste ist eine ganz normale Excel-Datei (.xlsx), die auf deinem Handy oder auf deinem eigenen NAS liegt. Kein Konto, keine Cloud, keine Werbung.
+
+<b>Erfassen</b>
+• Barcode scannen: Name, Weingut, Land und Farbe werden online gesucht (Open Food Facts, UPCitemdb, optional KI-Recherche).
+• QR-Code (E-Label) scannen: Die App liest die E-Label-Seite aus und merkt sich den Link – der nächste Scan findet den Wein sofort.
+• Ohne Barcode – ideal für hochwertige Weine: Fotos vom Etikett machen, Daten selbst eintragen oder per „Automatisch einlesen“ aus den Fotos holen (Texterkennung auf dem Gerät, optional KI).
+• Felder: Name, Weingut, Jahrgang, Land, Region/Appellation, Rebsorte, Farbe, Bewertung, Notiz, Fotos.
+• Dieselbe EAN mit mehreren Jahrgängen? Kein Problem – ein Wein ist immer EAN + Jahrgang.
+
+<b>Buchen</b>
+• Einkauf und Verkauf mit Menge, Preis und Datum.
+• Bestand, Ø-Einkaufspreis und Umsatz je Wein auf einen Blick.
+
+<b>Auswerten</b>
+• Kasse (was ging rein und raus) und Gewinn nach FIFO.
+• Nach Monaten, Jahren oder als Kalender, mit frei wählbarem Zeitraum.
+
+<b>Verkaufen</b>
+• Anzeigentext für Kleinanzeigen und eBay wird aus den Stammdaten erzeugt, die Fotos landen in der Galerie – nur noch einfügen.
+
+<b>Deine Daten bleiben bei dir</b>
+• Excel-Datei auf dem Handy oder per SMB auf dem NAS – mit Konflikterkennung und Sicherungskopie (.bak).
+• Offline weiterarbeiten, gespeichert wird beim nächsten Mal.
+• Eigene Zusatzspalten in Excel bleiben erhalten.
+• Auch als Windows-Programm für dieselbe Liste erhältlich.
+
+Die KI-Recherche nutzt Googles Gemini-API (optional, kostenloser Schlüssel aus Google AI Studio). Details in der Datenschutzerklärung.
+
+Für Personen ab 18 Jahren.

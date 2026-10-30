@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weinkeller – Datenschutzerklärung</title>
+<style>
+  :root { --bg: #f8f8fa; --fg: #1b1c20; --muted: #4a4d55; --accent: #6d1a36; --line: #dfe1e6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121216; --fg: #e3e3e8; --muted: #bdbfc8; --accent: #eba3b9; --line: #2b2c33; }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.8rem; margin: 0 0 4px; }
+  h2 { font-size: 1.2rem; margin: 32px 0 8px; color: var(--accent); }
+  p, li { color: var(--fg); }
+  .muted { color: var(--muted); }
+  a { color: var(--accent); }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 0.95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px; border-bottom: 1px solid var(--line); }
+  .box { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Datenschutzerklärung</h1>
+<p class="muted">App „Weinkeller“ für Android und Windows · Stand: Oktober 2026</p>
+
+<div class="box">
+<p><strong>Kurz gesagt:</strong> Weinkeller hat kein Benutzerkonto, keine Werbung, kein Tracking und keinen eigenen Server.
+Deine Weinliste liegt als Excel-Datei auf deinem Gerät oder auf deinem eigenen NAS. Nur wenn du einen Wein nachschlägst,
+gehen Barcode-Nummer, ggf. Fotos oder ein E-Label-Link an die unten genannten Dienste.</p>
+</div>
+
+<h2>1. Verantwortlicher</h2>
+<p>
+<!-- BITTE AUSFÜLLEN: Name, Anschrift und E-Mail des Anbieters (Pflichtangaben für Google Play / DSGVO) -->
+[Vor- und Nachname]<br>
+[Straße und Hausnummer]<br>
+[PLZ Ort]<br>
+E-Mail: [E-Mail-Adresse]
+</p>
+
+<h2>2. Welche Daten die App verarbeitet – und wo sie bleiben</h2>
+<ul>
+  <li><strong>Weinliste</strong> (Weine, Ein- und Verkäufe, Preise, Notizen, Bewertungen): als Excel-Datei an einem Ort, den du
+    selbst wählst – auf dem Gerät oder auf deinem NAS im Heimnetz. Der Entwickler erhält diese Daten nicht.</li>
+  <li><strong>Fotos</strong>, die du in der App aufnimmst oder auswählst: verkleinert im Speicher der App und – wenn deine Liste
+    auf dem NAS liegt – im Ordner „Weinkeller-Fotos“ daneben.</li>
+  <li><strong>Einstellungen und Zugangsdaten</strong> (NAS-Adresse, Benutzer, Passwort, eigene API-Schlüssel): nur auf dem Gerät.
+    Passwörter und Schlüssel werden verschlüsselt gespeichert (Android-Keystore bzw. Windows-Datenschutz-API).</li>
+  <li><strong>Kamera:</strong> Barcodes, QR-Codes und Etikett-Text werden auf dem Gerät erkannt (Google ML Kit, offline).
+    Das Kamerabild verlässt das Gerät dabei nicht.</li>
+</ul>
+<p>Die App erstellt keine Profile, nutzt keine Analyse- oder Werbedienste und erhebt keinen Standort.</p>
+
+<h2>3. Online-Abfragen an Drittanbieter</h2>
+<p>Für die Suche nach einem Wein ruft die App Dienste im Internet auf. Dabei wird technisch bedingt immer auch deine
+IP-Adresse an den jeweiligen Anbieter übertragen. Welche Inhalte gesendet werden:</p>
+<table>
+  <tr><th>Dienst</th><th>Wann</th><th>Was wird gesendet</th></tr>
+  <tr><td><a href="https://world.openfoodfacts.org/privacy">Open Food Facts</a></td>
+      <td>bei jedem Barcode-Scan</td><td>die Barcode-Nummer (EAN)</td></tr>
+  <tr><td><a href="https://www.upcitemdb.com/">UPCitemdb</a></td>
+      <td>wenn Open Food Facts nichts findet</td><td>die Barcode-Nummer</td></tr>
+  <tr><td><a href="https://ai.google.dev/gemini-api/terms">Google Gemini API</a> (Google)</td>
+      <td>wenn die freien Datenbanken nichts finden, beim QR-Code-Scan und beim Knopf „Automatisch einlesen“</td>
+      <td>Barcode-Nummer; beim Einlesen bis zu drei deiner Fotos; beim QR-Code den Link und den Text der E-Label-Seite</td></tr>
+  <tr><td><a href="https://www.ean-search.org/">EAN-Search</a></td>
+      <td>nur wenn du dort einen eigenen Zugang einträgst</td><td>die Barcode-Nummer bzw. deren Hersteller-Präfix</td></tr>
+  <tr><td>Webseite hinter einem QR-Code (E-Label)</td>
+      <td>beim Scan eines QR-Codes mit Link</td><td>Aufruf der Seite (wie im Browser)</td></tr>
+  <tr><td>Bildserver der Datenbanken</td>
+      <td>wenn ein Treffer ein Produktfoto hat</td><td>Abruf des Bildes (danach auf dem Gerät gespeichert)</td></tr>
+</table>
+<p><strong>Hinweis zur KI-Recherche (Gemini):</strong> Die App nutzt den kostenlosen Zugang der Gemini-API. Google darf
+Anfragen in diesem Zugang laut seinen Nutzungsbedingungen zur Verbesserung seiner Produkte verwenden; dabei können
+auch Menschen Inhalte prüfen. Schicke daher keine Fotos, auf denen Personen oder private Dinge zu sehen sind.
+Fotos werden nur gesendet, wenn du „Automatisch einlesen“ antippst.</p>
+<p>Für die Verarbeitung durch diese Anbieter gelten deren Datenschutzbestimmungen. Teilweise sitzen sie außerhalb der EU
+(z. B. in den USA).</p>
+
+<h2>4. Was die App nur öffnet</h2>
+<ul>
+  <li>„Im Web suchen“ öffnet eine Google-Suche im Browser.</li>
+  <li>„Inserieren“ kopiert Text in die Zwischenablage, legt Bilder in deine Galerie bzw. den Bilder-Ordner und öffnet die
+    App oder Webseite von Kleinanzeigen bzw. eBay. Was du dort eingibst, unterliegt deren Datenschutzbestimmungen.</li>
+</ul>
+
+<h2>5. Berechtigungen (Android)</h2>
+<ul>
+  <li><strong>Kamera</strong> – Barcodes und QR-Codes scannen, Etiketten fotografieren.</li>
+  <li><strong>Internet</strong> – Online-Suche (siehe Abschnitt 3) und Zugriff auf dein NAS.</li>
+</ul>
+
+<h2>6. Rechtsgrundlage</h2>
+<p>Soweit personenbezogene Daten (z. B. deine IP-Adresse) an die genannten Dienste gehen, geschieht das, weil du die
+jeweilige Funktion nutzt (Art. 6 Abs. 1 lit. b DSGVO) bzw. auf Grundlage des berechtigten Interesses, die gewünschte
+Funktion bereitzustellen (Art. 6 Abs. 1 lit. f DSGVO).</p>
+
+<h2>7. Speicherdauer und Löschen</h2>
+<p>Deine Daten bleiben so lange gespeichert, wie du sie in der Datei, auf dem NAS oder in der App behältst. Deinstallierst du
+die App, werden Einstellungen, Fotos und Zwischenspeicher im App-Speicher gelöscht. Deine Excel-Datei und der Foto-Ordner
+auf dem NAS bleiben erhalten, bis du sie selbst löschst.</p>
+
+<h2>8. Deine Rechte</h2>
+<p>Du hast das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und
+Widerspruch sowie das Recht, dich bei einer Datenschutz-Aufsichtsbehörde zu beschweren. Da der Entwickler keine Daten
+von dir erhält, wende dich für Daten bei den Drittanbietern bitte direkt an diese. Fragen beantworte ich gern unter der
+oben genannten E-Mail-Adresse.</p>
+
+<h2>9. Alter</h2>
+<p>Die App dreht sich um Wein und richtet sich an Erwachsene ab 18 Jahren.</p>
+
+<h2>10. Änderungen</h2>
+<p>Ändern sich Funktionen der App, wird diese Erklärung angepasst. Es gilt die jeweils hier veröffentlichte Fassung.</p>
+</main>
+</body>
+</html>
