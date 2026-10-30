@@ -96,6 +96,11 @@ Bauen (braucht JDK 17+): `./gradlew -p desktop run` zum Starten, `./gradlew -p d
 (nur unter Windows). Die Pipeline baut beides automatisch: `.msi` (Installation ohne Admin-Rechte, Updates ersetzen
 die alte Version) und `.zip` (entpacken, `Weinkeller.exe` starten).
 
+## Google Play
+- Datenschutzerklärung: `docs/datenschutz.html` (über GitHub Pages: Settings → Pages → Branch `main`, Ordner `/docs`).
+- Store-Texte und Grafiken: `fastlane/metadata/android/de-DE/`.
+- Antworten für die Formulare der Play Console (Datensicherheit, Einstufung …): `distribution/play-console.md`.
+
 ## GitHub & automatischer APK-Bau
 
 Die Pipeline (`.github/workflows/android.yml`) baut bei jedem Push auf `main` ein Release-APK und die Windows-Version
