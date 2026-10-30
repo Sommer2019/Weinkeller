@@ -2,6 +2,10 @@
 
 Paketname: `de.robin.wein` · Kategorie: **Essen & Trinken** · kostenlos · Zielgruppe ab 18
 
+**Verteilung: nur interner Test** (bis 100 Tester per Einladungslink, keine Prüfung durch Google, kein
+geschlossener Test nötig). Store-Eintrag und Grafiken sind dafür nicht zwingend – die Angaben unter „App-Inhalte“
+verlangt die Console trotzdem, bevor sie den ersten Release ausrollt.
+
 ## Store-Eintrag (Hauptseite)
 Texte und Grafiken liegen in `fastlane/metadata/android/de-DE/` (Format von fastlane/Google Play):
 
@@ -19,8 +23,7 @@ Texte und Grafiken liegen in `fastlane/metadata/android/de-DE/` (Format von fast
 ## App-Inhalte (Richtlinien)
 
 **Datenschutzerklärung:** `https://sommer2019.github.io/Weinkeller/datenschutz.html`
-(GitHub → Settings → Pages → Source „Deploy from a branch“, Branch `main`, Ordner `/docs`. Vorher in
-`docs/datenschutz.html` Name, Anschrift und E-Mail eintragen.)
+(GitHub → Settings → Pages → Source „Deploy from a branch“, Branch `main`, Ordner `/docs`.)
 
 **App-Zugriff:** Alle Funktionen ohne Anmeldung nutzbar.
 
@@ -57,5 +60,5 @@ Kein Standort, keine Kontakte, keine Kennungen, keine Analysedaten.
    hochladen, „Play App-Signatur“ akzeptieren, Tester-Liste (E-Mails) anlegen, Link verschicken.
 2. Danach automatisch: Secret `PLAY_SERVICE_ACCOUNT_JSON` (Dienstkonto mit Release-Rechten) und – solange die App
    nie veröffentlicht war – Repo-Variable `PLAY_RELEASE_STATUS=draft`. Jeder Push auf `main` landet dann im internen Test.
-3. Öffentlich: neue private Konten brauchen vorher einen **geschlossenen Test** (aktuell 12 Tester, 14 Tage),
-   dann „Produktion“ beantragen.
+3. Nur falls es doch einmal öffentlich werden soll: neue private Konten brauchen vorher einen **geschlossenen Test**
+   (aktuell 12 Tester, 14 Tage), dann „Produktion“ beantragen.
