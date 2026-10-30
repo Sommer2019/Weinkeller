@@ -84,7 +84,8 @@ jobs:
       # (Dienstkonto mit Release-Rechten in der Play Console). Die erste Version muss von Hand hochgeladen werden.
       # Schlägt der Upload fehl, gibt es nur eine Warnung – das GitHub-Release kommt trotzdem.
       - name: Upload in Google Play (interner Test)
-        if: env.AAB_NAME != '' && env.HAS_PLAY_JSON == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        # Push auf main oder manueller Start auf main („Run workflow“ → Branch main)
+        if: env.AAB_NAME != '' && env.HAS_PLAY_JSON == 'true' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         continue-on-error: true
         uses: r0adkll/upload-google-play@v1
         with:
