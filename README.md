@@ -43,7 +43,7 @@ Fotos, E-Label, Bewertung, Notiz und Marktpreis nicht) und bucht gleich den Eink
 ## Online-Quellen & Etikett
 Reihenfolge der Suche: Open Food Facts → UPCitemdb → KI-Recherche (optional) → EAN-Search (optional, kostenpflichtig).
 Menü → „Online-Quellen“:
-- **Gemini API-Schlüssel** (kostenlos, aistudio.google.com/apikey, ohne Kreditkarte): Gemini Flash (fest: gemini-3.6-flash) sucht per
+- **Gemini API-Schlüssel** (kostenlos, aistudio.google.com/apikey, ohne Kreditkarte): Gemini Flash (Alias gemini-flash-latest = jeweils aktuelles Flash-Modell) sucht per
   Google nach der EAN (Händler-/Winzerseiten) und kann das Etikett-Foto lesen. Gratis-Kontingent laut Google:
   bis 500 Anfragen mit Google-Suche pro Tag. Im Gratis-Zugang darf Google die Anfragen (EAN, Foto) zur
   Produktverbesserung verwenden. Läuft automatisch, wenn die freien Datenbanken nichts finden, und per Knopf

@@ -26,9 +26,8 @@ import javax.imageio.ImageIO
  * (geschickt werden nur EAN und ggf. das Etikett-Foto).
  */
 object GeminiLookup {
-    // Feste Modellversion statt Alias „gemini-flash-latest“: Google rät dazu, das Modell direkt aufzurufen,
-    // damit ein Wechsel hinter dem Alias die Recherche nicht unterbricht
-    private const val MODEL = "gemini-3.6-flash"
+    // Alias auf das jeweils aktuelle Flash-Modell – Google stellt es selbst um, die App muss nicht nachziehen
+    private const val MODEL = "gemini-flash-latest"
     private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 
     class GeminiException(msg: String) : Exception(msg)
@@ -56,7 +55,14 @@ object GeminiLookup {
         val response = try {
             request(key, Market.prompt(w), emptyList(), search = true)
         } catch (e: QuotaException) {
-            throw GeminiException("Kontingent der Gemini-Websuche erreicht – morgen wieder")
+            // Minutenlimit: Google nennt die Wartezeit – einmal abwarten und noch einmal versuchen
+            val wait = e.retrySeconds?.takeIf { !e.daily && it <= 60 } ?: throw GeminiException(e.text())
+            kotlinx.coroutines.delay((wait + 1) * 1000L)
+            try {
+                request(key, Market.prompt(w), emptyList(), search = true)
+            } catch (e2: QuotaException) {
+                throw GeminiException(e2.text())
+            }
         }
         val o = answerJson(response) ?: return@withContext emptyList()
         val a = o.optJSONArray("angebote") ?: return@withContext emptyList()
@@ -74,7 +80,40 @@ object GeminiLookup {
         }
     }
 
-    private class QuotaException : Exception()
+    /**
+     * HTTP 429 – welches Limit, steht in der Antwort von Google: Minuten- oder Tageskontingent,
+     * oder „limit: 0“ (Modell bzw. Websuche im Gratis-Zugang dieses Schlüssels gar nicht freigegeben).
+     */
+    private class QuotaException(val googleMessage: String, val quotaIds: List<String>, val retrySeconds: Int?) : Exception(googleMessage) {
+        val daily: Boolean get() = quotaIds.any { it.contains("PerDay", ignoreCase = true) }
+        val perMinute: Boolean get() = quotaIds.any { it.contains("PerMinute", ignoreCase = true) }
+        val none: Boolean get() = Regex("limit:\\s*0\\b").containsMatchIn(googleMessage)
+
+        fun text(): String = when {
+            none -> "Für diesen Gemini-Schlüssel ist die Websuche bzw. das Modell nicht freigegeben (Kontingent 0)"
+            daily -> "Tageskontingent der Gemini-Websuche erreicht – morgen wieder"
+            perMinute -> "Zu viele Gemini-Anfragen pro Minute – kurz warten und noch einmal versuchen"
+            else -> "Gemini meldet ein erreichtes Limit"
+        } + googleMessage.takeIf { it.isNotBlank() }?.let { " (Google: ${it.lineSequence().first().take(160)})" }.orEmpty()
+    }
+
+    /** Fehlermeldung von Google aus der Antwort lesen (error.message). */
+    private fun errorMessage(body: String): String =
+        runCatching { JSONObject(body).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("").trim()
+
+    private fun quotaException(body: String): QuotaException {
+        val details = runCatching { JSONObject(body).optJSONObject("error")?.optJSONArray("details") }.getOrNull()
+        val ids = ArrayList<String>()
+        var retry: Int? = null
+        if (details != null) for (i in 0 until details.length()) {
+            val d = details.optJSONObject(i) ?: continue
+            d.optJSONArray("violations")?.let { v ->
+                for (j in 0 until v.length()) v.optJSONObject(j)?.optString("quotaId")?.takeIf { it.isNotBlank() }?.let(ids::add)
+            }
+            d.optString("retryDelay").takeIf { it.isNotBlank() }?.let { retry = it.removeSuffix("s").toDoubleOrNull()?.toInt() }
+        }
+        return QuotaException(errorMessage(body), ids, retry)
+    }
 
     private fun request(key: String, prompt: String, images: List<String>, search: Boolean): String {
         val parts = JSONArray()
@@ -96,12 +135,15 @@ object GeminiLookup {
             c.setRequestProperty("Content-Type", "application/json")
             c.setRequestProperty("x-goog-api-key", key)
             c.outputStream.use { it.write(body.toString().toByteArray()) }
-            return when (c.responseCode) {
-                200 -> c.inputStream.bufferedReader().use { it.readText() }
-                400, 401, 403 -> throw GeminiException("Gemini lehnt den Schlüssel oder die Anfrage ab – Schlüssel prüfen")
-                404 -> throw GeminiException("Gemini-Modell nicht verfügbar – App aktualisieren")
-                429 -> if (search) throw QuotaException() else throw GeminiException("Tageskontingent von Gemini erreicht – morgen wieder")
-                else -> throw GeminiException("Gemini-Fehler ${c.responseCode}")
+            val code = c.responseCode
+            if (code == 200) return c.inputStream.bufferedReader().use { it.readText() }
+            val err = runCatching { c.errorStream?.bufferedReader()?.use { it.readText() } }.getOrNull().orEmpty()
+            val google = errorMessage(err).takeIf { it.isNotBlank() }?.let { " (Google: ${it.lineSequence().first().take(160)})" }.orEmpty()
+            throw when (code) {
+                400, 401, 403 -> GeminiException("Gemini lehnt den Schlüssel oder die Anfrage ab – Schlüssel prüfen$google")
+                404 -> GeminiException("Gemini-Modell nicht verfügbar – App aktualisieren$google")
+                429 -> quotaException(err).let { q -> if (search) q else GeminiException(q.text()) }
+                else -> GeminiException("Gemini-Fehler $code$google")
             }
         } finally {
             c.disconnect()
