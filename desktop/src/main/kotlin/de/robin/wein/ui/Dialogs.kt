@@ -461,3 +461,38 @@ fun AddVintageDialog(wine: Wine, existing: List<Int?>, onSave: (Int?) -> Unit, o
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
     )
 }
+
+// ---------------------------------------------------------------- Marktpreis von Hand
+
+/** Marktpreis selbst eintragen (z. B. von Wine-Searcher oder einer Händlerliste). Leeres Feld + Speichern entfernt ihn. */
+@Composable
+fun MarketDialog(wine: Wine, onSave: (Double?, String) -> Unit, onDismiss: () -> Unit) {
+    var price by remember { mutableStateOf(wine.marketPrice?.let { String.format(Locale.GERMANY, "%.2f", it) }.orEmpty()) }
+    var info by remember { mutableStateOf(wine.marketInfo) }
+    val parsed = price.replace("€", "").replace(',', '.').trim().takeIf { it.isNotEmpty() }?.toDoubleOrNull()
+    val ok = price.isBlank() || (parsed != null && parsed > 0)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Marktpreis eintragen") },
+        text = {
+            Column {
+                Text("${wine.name} ${wine.vintageLabel} – Preis je 0,75-l-Flasche. Als Stand gilt heute.",
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    price, { price = it }, Modifier.fillMaxWidth(), label = { Text("Marktpreis je Flasche (€)") },
+                    singleLine = true, isError = !ok,
+                    supportingText = { if (price.isBlank() && wine.marketPrice != null) Text("Leer lassen = Marktpreis entfernen") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                )
+                OutlinedTextField(info, { info = it }, Modifier.fillMaxWidth(), label = { Text("Quelle / Notiz (optional)") },
+                    placeholder = { Text("z. B. Wine-Searcher, Händler XY") }, singleLine = true)
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = ok && (parsed != null || wine.marketPrice != null), onClick = { onSave(parsed, info); onDismiss() }) {
+                Text(if (parsed == null) "Entfernen" else "Speichern")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
+}

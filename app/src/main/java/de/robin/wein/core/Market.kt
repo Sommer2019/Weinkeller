@@ -68,5 +68,10 @@ object Market {
         return w.copy(marketPrice = Math.round(p.median * 100) / 100.0, marketDate = date, marketInfo = info)
     }
 
+    /** Selbst eingetragener Marktpreis (z. B. aus Wine-Searcher, Händlerliste); price = null entfernt ihn. */
+    fun manual(w: Wine, price: Double?, info: String, date: LocalDate): Wine =
+        if (price == null) w.copy(marketPrice = null, marketDate = null, marketInfo = "")
+        else w.copy(marketPrice = Math.round(price * 100) / 100.0, marketDate = date, marketInfo = info.trim().ifEmpty { "selbst eingetragen" })
+
     private fun eur(v: Double) = String.format(Locale.GERMANY, "%.2f €", v)
 }

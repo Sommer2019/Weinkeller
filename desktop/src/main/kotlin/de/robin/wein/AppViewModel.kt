@@ -341,6 +341,13 @@ class AppViewModel {
 
     val hasAi: Boolean get() = activeConfig().geminiKey.isNotBlank()
 
+    /** Marktpreis von Hand eintragen oder ändern; price = null entfernt ihn. */
+    fun setMarket(key: String, price: Double?, info: String) {
+        val w = cellar.wine(key) ?: return
+        change(cellar.upsert(Market.manual(w, price, info, java.time.LocalDate.now())),
+            if (price == null) "Marktpreis entfernt" else "Marktpreis gespeichert")
+    }
+
     /** Weine, deren Marktpreis gerade gesucht wird. */
     var marketBusy by mutableStateOf(emptySet<String>())
         private set

@@ -61,6 +61,8 @@ Die App bildet daraus selbst den **Median** je 0,75-l-Flasche: nur Angebote des 
 umgerechnet, je Shop nur das günstigste Angebot. Angezeigt werden Median, Abstand zum Ø Einkauf, Anzahl/Spanne der Angebote
 und das Datum. Gespeichert wird das in den Spalten „Marktpreis (Median)“, „Marktpreis Stand“, „Marktpreis Info“;
 der Bestand zeigt zusätzlich den Marktwert aller Flaschen mit ermitteltem Preis. Aktualisieren nur per Knopf.
+Ohne KI oder für eigene Quellen (Wine-Searcher, Händlerliste): „Eintragen“ bzw. „Ändern“ – Preis je Flasche und optional
+eine Notiz zur Quelle; Stand ist der Tag des Eintrags. Feld leeren und speichern entfernt den Marktpreis.
 
 ## Inserieren
 Weindetails → „Auf Kleinanzeigen / eBay inserieren“: Titel und Beschreibung werden aus den Stammdaten erzeugt

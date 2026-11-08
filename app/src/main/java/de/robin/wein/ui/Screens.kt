@@ -503,11 +503,12 @@ private fun StatRow(l1: String, v1: String, l2: String, v2: String) {
 @Composable
 private fun MarketBox(vm: AppViewModel, w: Wine, avgBuy: Double?) {
     val busy = w.key in vm.marketBusy
+    var manual by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("Marktpreis im Netz", color = MaterialTheme.colorScheme.onSurfaceVariant)
             val p = w.marketPrice
-            if (p == null) Text(if (vm.hasAi) "noch nicht ermittelt" else "braucht Gemini-Schlüssel (Menü → Online-Quellen)",
+            if (p == null) Text(if (vm.hasAi) "noch nicht ermittelt" else "selbst eintragen – automatisch nur mit Gemini-Schlüssel (Menü → Online-Quellen)",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             else {
                 Row(verticalAlignment = Alignment.Bottom) {
@@ -523,9 +524,13 @@ private fun MarketBox(vm: AppViewModel, w: Wine, avgBuy: Double?) {
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-        else TextButton(enabled = vm.hasAi, onClick = { vm.checkMarket(w.key) }) { Text(if (w.marketPrice == null) "Ermitteln" else "Aktualisieren") }
+        Column(horizontalAlignment = Alignment.End) {
+            if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+            else if (vm.hasAi) TextButton(onClick = { vm.checkMarket(w.key) }) { Text(if (w.marketPrice == null) "Ermitteln" else "Aktualisieren") }
+            TextButton(onClick = { manual = true }) { Text(if (w.marketPrice == null) "Eintragen" else "Ändern") }
+        }
     }
+    if (manual) MarketDialog(w, onSave = { price, info -> vm.setMarket(w.key, price, info) }, onDismiss = { manual = false })
 }
 
 /** Filter-Chip mit Auswahlmenü: zeigt den gewählten Wert, „Alle“ hebt den Filter auf. */
