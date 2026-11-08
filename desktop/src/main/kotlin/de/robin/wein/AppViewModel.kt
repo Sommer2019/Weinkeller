@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import de.robin.wein.core.Cellar
+import de.robin.wein.core.Market
 import de.robin.wein.core.LabelResult
 import de.robin.wein.core.Movement
 import de.robin.wein.core.QrCode
@@ -247,6 +248,16 @@ class AppViewModel {
         change(cellar.upsert(w, replacingKey))
     }
 
+    /**
+     * Weiteren Jahrgang eines vorhandenen Weins anlegen – Stammdaten werden übernommen.
+     * Liefert den Schlüssel des neuen (oder schon vorhandenen) Eintrags.
+     */
+    fun addVintage(from: Wine, vintage: Int?): String {
+        val w = from.asVintage(vintage)
+        if (cellar.wine(w.key) == null) change(cellar.upsert(w), "${w.name} ${w.vintageLabel} angelegt")
+        return w.key
+    }
+
     fun addMovement(m: Movement) {
         val name = cellar.wine(m.key)?.name.orEmpty()
         change(cellar.add(m), "${m.kind.label}: ${m.quantity}× $name")
@@ -326,6 +337,34 @@ class AppViewModel {
     }
 
     val hasAi: Boolean get() = activeConfig().geminiKey.isNotBlank()
+
+    /** Weine, deren Marktpreis gerade gesucht wird. */
+    var marketBusy by mutableStateOf(emptySet<String>())
+        private set
+
+    /** Marktpreis im Netz: KI-Websuche nach Angeboten, Median je 0,75-l-Flasche, wird beim Wein gespeichert. */
+    fun checkMarket(key: String) {
+        val w = cellar.wine(key) ?: return
+        val apiKey = activeConfig().geminiKey
+        if (apiKey.isBlank()) { _events.tryEmit("Marktpreis braucht die KI-Recherche – Gemini-Schlüssel unter Menü → Online-Quellen"); return }
+        if (key in marketBusy) return
+        marketBusy = marketBusy + key
+        scope.launch {
+            try {
+                val p = Market.evaluate(de.robin.wein.lookup.GeminiLookup.offers(apiKey, w), w.vintage)
+                val cur = cellar.wine(key)
+                when {
+                    p == null -> _events.tryEmit("Keine passenden Angebote für ${w.name} ${w.vintageLabel} gefunden")
+                    cur != null -> change(cellar.upsert(Market.apply(cur, p, java.time.LocalDate.now())),
+                        "Marktpreis ${w.name} ${w.vintageLabel}: " + String.format(java.util.Locale.GERMANY, "%.2f €", p.median))
+                }
+            } catch (e: Throwable) {
+                _events.tryEmit("Marktpreis nicht ermittelt: ${e.message ?: e}")
+            } finally {
+                marketBusy = marketBusy - key
+            }
+        }
+    }
 
     /** KI-Recherche per Knopf: EAN und/oder Etikett-Foto. Fehlertext statt Exception. */
     suspend fun askAi(ean: String?, labels: List<File>): Pair<LookupResult?, String?> {

@@ -423,3 +423,41 @@ fun SourcesDialog(initial: de.robin.wein.lookup.LookupConfig, onSave: (de.robin.
         dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
     )
 }
+
+// ---------------------------------------------------------------- Weiterer Jahrgang
+
+/** Neuen Jahrgang eines vorhandenen Weins anlegen: nur die Jahreszahl – Stammdaten kommen vom Wein. */
+@Composable
+fun AddVintageDialog(wine: Wine, existing: List<Int?>, onSave: (Int?) -> Unit, onDismiss: () -> Unit) {
+    var vintage by remember { mutableStateOf("") }
+    var noVintage by remember { mutableStateOf(false) }
+    val num = vintage.toIntOrNull()
+    val chosen: Int? = if (noVintage) null else num
+    val inRange = noVintage || (num != null && num in 1900..(LocalDate.now().year + 1))
+    val taken = inRange && chosen in existing
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Weiterer Jahrgang") },
+        text = {
+            Column {
+                Text("${wine.name} – Weingut, Herkunft, Rebsorte und EAN werden übernommen. Danach gleich den Einkauf buchen.",
+                    style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        if (noVintage) "" else vintage, { v -> vintage = v.filter { it.isDigit() }.take(4) },
+                        Modifier.weight(1f), label = { Text("Jahrgang") }, singleLine = true, enabled = !noVintage,
+                        isError = vintage.length == 4 && !inRange || taken,
+                        supportingText = { if (taken) Text("Diesen Jahrgang gibt es schon") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    Checkbox(noVintage, { noVintage = it })
+                    Text("ohne", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = inRange && !taken, onClick = { onSave(chosen); onDismiss() }) { Text("Anlegen") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Abbrechen") } },
+    )
+}

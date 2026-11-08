@@ -1,6 +1,9 @@
 package de.robin.wein.lookup
 
 import de.robin.wein.core.Guess
+import de.robin.wein.core.Market
+import de.robin.wein.core.Offer
+import de.robin.wein.core.Wine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -37,18 +40,45 @@ object GeminiLookup {
     suspend fun ask(key: String, ean: String?, labels: List<File>, page: QrPage? = null): LookupResult? = withContext(Dispatchers.IO) {
         val images = labels.mapNotNull { jpegBase64(it) }
         val response = try {
-            request(key, ean, images, page, search = true)
+            request(key, prompt(ean, images.isNotEmpty(), page, search = true), images, search = true)
         } catch (e: QuotaException) {
-            request(key, ean, images, page, search = false)
+            request(key, prompt(ean, images.isNotEmpty(), page, search = false), images, search = false)
         }
         parse(response)
     }
 
+    /**
+     * Marktpreis: Gemini sucht per Google nach aktuellen Angeboten des Weins und listet sie einzeln auf.
+     * Den Median bildet die App selbst (Market.evaluate) – die KI liefert nur die Rohdaten.
+     * Ohne Websuche ergibt das keinen Sinn, daher bei erschöpftem Kontingent ein Fehler statt eines zweiten Versuchs.
+     */
+    suspend fun offers(key: String, w: Wine): List<Offer> = withContext(Dispatchers.IO) {
+        val response = try {
+            request(key, Market.prompt(w), emptyList(), search = true)
+        } catch (e: QuotaException) {
+            throw GeminiException("Kontingent der Gemini-Websuche erreicht – morgen wieder")
+        }
+        val o = answerJson(response) ?: return@withContext emptyList()
+        val a = o.optJSONArray("angebote") ?: return@withContext emptyList()
+        (0 until a.length()).mapNotNull { i ->
+            val x = a.optJSONObject(i) ?: return@mapNotNull null
+            val price = x.optDouble("preis", Double.NaN).takeIf { !it.isNaN() }
+                ?: x.optString("preis").replace("€", "").replace(',', '.').trim().toDoubleOrNull()
+                ?: return@mapNotNull null
+            Offer(
+                shop = x.optString("shop").trim(),
+                price = price,
+                liters = x.optDouble("liter", Double.NaN).takeIf { !it.isNaN() && it > 0 },
+                vintage = x.optInt("jahrgang", 0).takeIf { it in 1900..2100 },
+            )
+        }
+    }
+
     private class QuotaException : Exception()
 
-    private fun request(key: String, ean: String?, images: List<String>, page: QrPage?, search: Boolean): String {
+    private fun request(key: String, prompt: String, images: List<String>, search: Boolean): String {
         val parts = JSONArray()
-        parts.put(JSONObject().put("text", prompt(ean, images.isNotEmpty(), page, search)))
+        parts.put(JSONObject().put("text", prompt))
         images.forEach { b64 ->
             parts.put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", b64)))
         }
@@ -96,16 +126,21 @@ object GeminiLookup {
         append(" Erfinde nichts: Unbekanntes leer lassen; wenn du den Wein nicht sicher findest, gefunden=false.")
     }
 
-    private fun parse(response: String): LookupResult? {
-        val root = JSONObject(response)
-        val cand = root.optJSONArray("candidates")?.optJSONObject(0) ?: return null
+    /** Das JSON-Objekt aus der Antwort des Modells (steht manchmal in Text oder ```-Blöcken). */
+    private fun answerJson(response: String): JSONObject? {
+        val cand = JSONObject(response).optJSONArray("candidates")?.optJSONObject(0) ?: return null
         val text = cand.optJSONObject("content")?.optJSONArray("parts")?.let { ps ->
             (0 until ps.length()).joinToString("") { ps.optJSONObject(it)?.optString("text").orEmpty() }
         }.orEmpty()
         val start = text.indexOf('{')
         val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) return null
-        val o = runCatching { JSONObject(text.substring(start, end + 1)) }.getOrNull() ?: return null
+        return runCatching { JSONObject(text.substring(start, end + 1)) }.getOrNull()
+    }
+
+    private fun parse(response: String): LookupResult? {
+        val cand = JSONObject(response).optJSONArray("candidates")?.optJSONObject(0) ?: return null
+        val o = answerJson(response) ?: return null
         if (!o.optBoolean("gefunden", true)) return null
         val name = o.optString("name").trim()
         val producer = o.optString("weingut").trim()

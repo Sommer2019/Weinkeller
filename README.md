@@ -24,6 +24,11 @@ Die EAN bleibt dann leer, die App vergibt intern eine eigene Nummer.
 
 Dieselbe EAN gilt oft für mehrere Jahrgänge – ein Wein ist deshalb immer EAN + Jahrgang.
 
+**Mehrere Jahrgänge**: Einträge mit gleicher EAN oder gleichem Name + Weingut gehören zum selben Wein.
+Der Bestand zeigt sie als eine Zeile (z. B. „2021 (4), 2019 (2)“, Gesamtbestand rechts). In den Details
+wechselt man per Chip zwischen den Jahrgängen; „+ Jahrgang“ legt einen weiteren an (Stammdaten werden übernommen,
+Fotos, E-Label, Bewertung, Notiz und Marktpreis nicht) und bucht gleich den Einkauf.
+
 **QR-Code** (seit Dez. 2023 meist das E-Label mit Zutaten/Nährwerten): einfach wie einen Barcode scannen.
 - Steckt eine GTIN drin (GS1-Link `…/01/<Nummer>`), läuft alles wie beim Barcode.
 - Sonst ist es ein Link: Die App lädt die E-Label-Seite und schlägt Name, Weingut, Jahrgang … vor
@@ -44,6 +49,14 @@ Menü → „Online-Quellen“:
 „Automatisch einlesen“ im Anlegen-Dialog: Die Texterkennung läuft offline und füllt nur leere Felder:
 größte Schrift = Name (+ Prädikat wie „Spätlese trocken“), Zeile mit Weingut/Domaine/Château … = Erzeuger,
 Rebsorte und Region per Wortliste. Stehen mehrere Jahreszahlen drauf, wählst du den Jahrgang per Antippen.
+
+## Marktpreis im Netz
+Weindetails → „Marktpreis im Netz“ → „Ermitteln“ (braucht den Gemini-Schlüssel): Die KI sucht per Google nach aktuellen
+Angeboten genau dieses Weins und Jahrgangs (Händler, Weinshops, Weingut; bevorzugt DE/EU) und listet sie einzeln auf.
+Die App bildet daraus selbst den **Median** je 0,75-l-Flasche: nur Angebote des passenden Jahrgangs, andere Flaschengrößen
+umgerechnet, je Shop nur das günstigste Angebot. Angezeigt werden Median, Abstand zum Ø Einkauf, Anzahl/Spanne der Angebote
+und das Datum. Gespeichert wird das in den Spalten „Marktpreis (Median)“, „Marktpreis Stand“, „Marktpreis Info“;
+der Bestand zeigt zusätzlich den Marktwert aller Flaschen mit ermitteltem Preis. Aktualisieren nur per Knopf.
 
 ## Inserieren
 Weindetails → „Auf Kleinanzeigen / eBay inserieren“: Titel und Beschreibung werden aus den Stammdaten erzeugt
