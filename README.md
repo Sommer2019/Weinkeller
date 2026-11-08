@@ -24,6 +24,10 @@ Die EAN bleibt dann leer, die App vergibt intern eine eigene Nummer.
 
 Dieselbe EAN gilt oft für mehrere Jahrgänge – ein Wein ist deshalb immer EAN + Jahrgang.
 
+**Filter im Bestand**: Chips „Weingut“, „Region“, „Jahrgang“ unter der Suche – antippen und Wert wählen (mit Anzahl).
+Die Filter lassen sich kombinieren und mit der Suche verbinden; angeboten werden nur Werte, die mit den übrigen Filtern
+etwas finden. „Filter aufheben“ setzt alle zurück.
+
 **Mehrere Jahrgänge**: Einträge mit gleicher EAN oder gleichem Name + Weingut gehören zum selben Wein.
 Der Bestand zeigt sie als eine Zeile (z. B. „2021 (4), 2019 (2)“, Gesamtbestand rechts). In den Details
 wechselt man per Chip zwischen den Jahrgängen; „+ Jahrgang“ legt einen weiteren an (Stammdaten werden übernommen,

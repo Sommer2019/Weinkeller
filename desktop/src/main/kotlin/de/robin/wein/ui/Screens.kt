@@ -23,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
@@ -74,6 +75,7 @@ import de.robin.wein.Phase
 import de.robin.wein.ScanHit
 import de.robin.wein.core.MoveKind
 import de.robin.wein.core.QrCode
+import de.robin.wein.core.StockFilter
 import de.robin.wein.openUrl
 import de.robin.wein.core.Wine
 import kotlinx.coroutines.launch
@@ -291,8 +293,10 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
 @Composable
 private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
     val cellar = vm.cellar
-    val list = remember(cellar, vm.query, vm.showAll) {
-        cellar.groupVintages(cellar.search(vm.query).filter { vm.showAll || cellar.stats(it.key).stock > 0 })
+    // Grundmenge für die Filter-Auswahl: „Auf Lager“ bzw. „Alle“, ohne Suchtext
+    val base = remember(cellar, vm.showAll) { cellar.wines.filter { vm.showAll || cellar.stats(it.key).stock > 0 } }
+    val list = remember(cellar, vm.query, vm.showAll, vm.filter) {
+        cellar.groupVintages(cellar.search(vm.query).filter { (vm.showAll || cellar.stats(it.key).stock > 0) && vm.filter.matches(it) })
     }
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -311,9 +315,17 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
             Text("${cellar.totalStock} Fl. · ${euro(cellar.stockValue)}" + (cellar.marketValue?.let { " · Markt ${euro(it)}" } ?: ""),
                 style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StockFilter.Field.entries.forEach { f ->
+                FilterMenuChip(f.label, vm.filter[f], vm.filter.options(base, f)) { vm.filter = vm.filter.with(f, it) }
+            }
+            if (vm.filter.active) TextButton(onClick = { vm.filter = StockFilter() }) { Text("Filter aufheben") }
+        }
         if (list.isEmpty()) {
             Text(
                 if (cellar.wines.isEmpty()) "Noch keine Weine. Unten rechts auf + klicken und den ersten Barcode scannen – oder „Ohne Barcode“: Fotos machen und Daten selbst eintragen oder einlesen lassen."
+                else if (vm.filter.active) "Nichts gefunden – Filter aufheben oder „Alle“ wählen."
                 else "Nichts gefunden.",
                 Modifier.padding(24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -495,5 +507,30 @@ private fun MarketBox(vm: AppViewModel, w: Wine, avgBuy: Double?) {
         }
         if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
         else TextButton(enabled = vm.hasAi, onClick = { vm.checkMarket(w.key) }) { Text(if (w.marketPrice == null) "Ermitteln" else "Aktualisieren") }
+    }
+}
+
+/** Filter-Chip mit Auswahlmenü: zeigt den gewählten Wert, „Alle“ hebt den Filter auf. */
+@Composable
+private fun FilterMenuChip(label: String, selected: String?, options: List<Pair<String, Int>>, onSelect: (String?) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        FilterChip(
+            selected = selected != null, onClick = { open = true },
+            label = { Text(selected?.let { "$label: $it" } ?: label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            trailingIcon = { Icon(Icons.Filled.ArrowDropDown, null) },
+            enabled = options.isNotEmpty() || selected != null,
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(text = { Text("Alle", fontWeight = if (selected == null) FontWeight.Bold else null) },
+                onClick = { open = false; onSelect(null) })
+            HorizontalDivider()
+            options.forEach { (v, n) ->
+                DropdownMenuItem(
+                    text = { Text("$v ($n)", fontWeight = if (v.equals(selected, ignoreCase = true)) FontWeight.Bold else null) },
+                    onClick = { open = false; onSelect(v) },
+                )
+            }
+        }
     }
 }

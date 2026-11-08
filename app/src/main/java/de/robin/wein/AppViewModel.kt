@@ -15,6 +15,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.robin.wein.core.Cellar
+import de.robin.wein.core.StockFilter
 import de.robin.wein.core.Market
 import de.robin.wein.core.Movement
 import de.robin.wein.core.QrCode
@@ -96,6 +97,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     // Bestand
     var query by mutableStateOf("")
     var showAll by mutableStateOf(false)
+    /** Filter nach Weingut, Region/Appellation, Jahrgang. */
+    var filter by mutableStateOf(StockFilter())
 
     // Scannen
     var scan by mutableStateOf<ScanHit?>(null)
