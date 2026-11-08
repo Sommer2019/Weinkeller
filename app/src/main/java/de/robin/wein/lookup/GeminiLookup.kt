@@ -26,8 +26,9 @@ import java.util.Calendar
  * (geschickt werden nur EAN und ggf. das Etikett-Foto).
  */
 object GeminiLookup {
-    // Alias auf das jeweils aktuelle Flash-Modell – Google stellt es selbst um, die App muss nicht nachziehen
-    private const val MODEL = "gemini-flash-latest"
+    // Feste Modellversion: der Alias „gemini-flash-latest“ antwortete im Test nicht zuverlässig.
+    // Ältere Modelle sperrt Google für neue Schlüssel (404) – dann hier auf das genannte Nachfolgemodell umstellen.
+    private const val MODEL = "gemini-3.8-flash"
     private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
 
     class GeminiException(msg: String) : Exception(msg)
@@ -84,24 +85,29 @@ object GeminiLookup {
      * HTTP 429 – welches Limit, steht in der Antwort von Google: Minuten- oder Tageskontingent,
      * oder „limit: 0“ (Modell bzw. Websuche im Gratis-Zugang dieses Schlüssels gar nicht freigegeben).
      */
-    private class QuotaException(val googleMessage: String, val quotaIds: List<String>, val retrySeconds: Int?) : Exception(googleMessage) {
+    private class QuotaException(val googleMessage: String, val quotaIds: List<String>, val retrySeconds: Int?, val search: Boolean) : Exception(googleMessage) {
         val daily: Boolean get() = quotaIds.any { it.contains("PerDay", ignoreCase = true) }
         val perMinute: Boolean get() = quotaIds.any { it.contains("PerMinute", ignoreCase = true) }
         val none: Boolean get() = Regex("limit:\\s*0\\b").containsMatchIn(googleMessage)
+        /** Kein konkretes Limit genannt, aber mit Websuche angefragt: die Suchfundierung ist für das Projekt gesperrt. */
+        val searchBlocked: Boolean get() = search && !none && !daily && !perMinute
 
         fun text(): String = when {
             none -> "Für diesen Gemini-Schlüssel ist die Websuche bzw. das Modell nicht freigegeben (Kontingent 0)"
-            daily -> "Tageskontingent der Gemini-Websuche erreicht – morgen wieder"
+            daily -> if (search) "Tageskontingent der Gemini-Websuche erreicht – morgen wieder" else "Tageskontingent von Gemini erreicht – morgen wieder"
             perMinute -> "Zu viele Gemini-Anfragen pro Minute – kurz warten und noch einmal versuchen"
+            searchBlocked -> "Websuche für dieses Gemini-Projekt nicht freigegeben oder aufgebraucht – " +
+                "aistudio.google.com → Rate Limit → Suchfundierung; freischalten über Abrechnung im Projekt"
             else -> "Gemini meldet ein erreichtes Limit"
-        } + googleMessage.takeIf { it.isNotBlank() }?.let { " (Google: ${it.lineSequence().first().take(160)})" }.orEmpty()
+        } + googleMessage.takeIf { it.isNotBlank() && !searchBlocked }
+            ?.let { " (Google: ${it.lineSequence().first().take(160)})" }.orEmpty()
     }
 
     /** Fehlermeldung von Google aus der Antwort lesen (error.message). */
     private fun errorMessage(body: String): String =
         runCatching { JSONObject(body).optJSONObject("error")?.optString("message").orEmpty() }.getOrDefault("").trim()
 
-    private fun quotaException(body: String): QuotaException {
+    private fun quotaException(body: String, search: Boolean): QuotaException {
         val details = runCatching { JSONObject(body).optJSONObject("error")?.optJSONArray("details") }.getOrNull()
         val ids = ArrayList<String>()
         var retry: Int? = null
@@ -112,7 +118,7 @@ object GeminiLookup {
             }
             d.optString("retryDelay").takeIf { it.isNotBlank() }?.let { retry = it.removeSuffix("s").toDoubleOrNull()?.toInt() }
         }
-        return QuotaException(errorMessage(body), ids, retry)
+        return QuotaException(errorMessage(body), ids, retry, search)
     }
 
     private fun request(key: String, prompt: String, images: List<String>, search: Boolean): String {
@@ -142,7 +148,7 @@ object GeminiLookup {
             throw when (code) {
                 400, 401, 403 -> GeminiException("Gemini lehnt den Schlüssel oder die Anfrage ab – Schlüssel prüfen$google")
                 404 -> GeminiException("Gemini-Modell nicht verfügbar – App aktualisieren$google")
-                429 -> quotaException(err).let { q -> if (search) q else GeminiException(q.text()) }
+                429 -> quotaException(err, search).let { q -> if (search) q else GeminiException(q.text()) }
                 else -> GeminiException("Gemini-Fehler $code$google")
             }
         } finally {
