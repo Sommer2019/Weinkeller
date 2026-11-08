@@ -25,11 +25,26 @@ data class Wine(
     val qr: String = "",
     /** Eigene Fotos (Dateinamen im Foto-Ordner) – für Weine ohne Barcode oder ohne Online-Treffer. */
     val photos: List<String> = emptyList(),
+    /** Median der Online-Angebote je Flasche (0,75 l), per KI-Websuche ermittelt; null = noch nicht gesucht. */
+    val marketPrice: Double? = null,
+    /** Wann der Marktpreis ermittelt wurde. */
+    val marketDate: LocalDate? = null,
+    /** Kurzinfo zum Marktpreis, z. B. „7 Angebote, 18,90–29,00 € (Hawesko, Vinexus …)“. */
+    val marketInfo: String = "",
     /** Spalten, die jemand in Excel selbst ergänzt hat – werden unverändert mitgeschrieben. */
     val extra: Map<String, String> = emptyMap(),
 ) {
     val key: String get() = keyOf(ean, vintage)
     val vintageLabel: String get() = vintage?.toString() ?: "o. J."
+
+    /**
+     * Derselbe Wein in einem anderen Jahrgang: Stammdaten (EAN, Name, Weingut, Herkunft …) bleiben,
+     * was zum einzelnen Jahrgang gehört (Fotos, QR/E-Label, Bewertung, Notiz, Marktpreis), fängt leer an.
+     */
+    fun asVintage(v: Int?): Wine = copy(
+        vintage = v, photos = emptyList(), qr = "", rating = "", note = "",
+        marketPrice = null, marketDate = null, marketInfo = "",
+    )
 
     companion object {
         fun keyOf(ean: String, vintage: Int?) = "${ean.trim()}|${vintage ?: "NV"}"
@@ -99,6 +114,8 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
     // Identität statt equals: zwei gleiche Buchungen am selben Tag sind trotzdem zwei Buchungen
     private val saleOf: Map<Movement, Sale> = IdentityHashMap<Movement, Sale>().also { m -> sales.forEach { m[it.movement] = it } }
     private val stats: Map<String, Stats> = computeStats()
+    /** Welche Einträge derselbe Wein in verschiedenen Jahrgängen sind (gleiche EAN oder gleicher Name + Weingut). */
+    private val familyOf: Map<String, Int> = computeFamilies()
 
     fun sale(m: Movement): Sale? = saleOf[m]
 
@@ -147,6 +164,20 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
     fun movementsOf(key: String): List<Movement> = movements.filter { it.key == key }.sortedByDescending { it.date }
     val totalStock: Int get() = stats.values.sumOf { it.stock }
     val stockValue: Double get() = stats.values.sumOf { s -> (s.avgBuy ?: 0.0) * s.stock.coerceAtLeast(0) }
+    /** Bestand bewertet mit dem Marktpreis aus dem Netz – nur Weine, für die einer ermittelt wurde; null, wenn keiner. */
+    val marketValue: Double?
+        get() = wines.filter { it.marketPrice != null && stats(it.key).stock > 0 }
+            .takeIf { it.isNotEmpty() }?.sumOf { it.marketPrice!! * stats(it.key).stock }
+
+    /** Alle Jahrgänge dieses Weins (inkl. key selbst), neuester zuerst, „ohne Jahrgang“ am Ende. */
+    fun vintagesOf(key: String): List<Wine> {
+        val f = familyOf[key] ?: return listOfNotNull(wine(key))
+        return wines.filter { familyOf[it.key] == f }.sortedWith(VINTAGE_ORDER)
+    }
+
+    /** Fasst eine (z. B. gefilterte) Liste nach Wein zusammen; Reihenfolge wie der jeweils erste Treffer. */
+    fun groupVintages(list: List<Wine>): List<List<Wine>> =
+        list.withIndex().groupBy({ (i, w) -> familyOf[w.key] ?: (-1 - i) }, { it.value }).values.map { it.sortedWith(VINTAGE_ORDER) }
 
     /** Wein anlegen oder Stammdaten ersetzen (nur was übergeben wird – nichts wird automatisch gelöscht). */
     fun upsert(w: Wine, replacingKey: String? = null): Cellar {
@@ -193,6 +224,17 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
         return movements.mapNotNull { result[it] }
     }
 
+    private fun computeFamilies(): Map<String, Int> {
+        val parent = IntArray(wines.size) { it }
+        fun find(i: Int): Int { var x = i; while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x] }; return x }
+        fun union(ids: List<Int>) = ids.drop(1).forEach { parent[find(it)] = find(ids[0]) }
+        val idx = wines.indices
+        idx.filter { wines[it].ean.isNotBlank() }.groupBy { wines[it].ean.trim() }.values.forEach { union(it) }
+        idx.filter { wines[it].name.isNotBlank() }.groupBy { tokenize(wines[it].producer + " " + wines[it].name).joinToString(" ") }
+            .values.forEach { union(it) }
+        return idx.associate { wines[it].key to find(it) }
+    }
+
     private fun computeStats(): Map<String, Stats> = movements.groupBy { it.key }.mapValues { (_, ms) ->
         val buys = ms.filter { it.kind == MoveKind.BUY }
         val sells = ms.filter { it.kind == MoveKind.SELL }
@@ -234,13 +276,15 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
 
     companion object {
         private val EMPTY = Stats(0, 0, 0, null, null, 0.0, null, null)
+        private val VINTAGE_ORDER = compareByDescending<Wine> { it.vintage ?: Int.MIN_VALUE }
 
         // ------------------------------------------------------------ Excel
 
         const val SHEET_WINES = "Weine"
         const val SHEET_MOVES = "Bewegungen"
         private val WINE_COLS = listOf("Schlüssel", "EAN", "Jahrgang", "Name", "Weingut", "Land", "Region", "Rebsorte", "Farbe", "Notiz", "Quelle",
-            "Bestand", "Ø Einkauf", "Verkauft", "Umsatz Verkauf", "Gewinn", "Bild", "Fotos", "Bewertung", "QR-Code")
+            "Bestand", "Ø Einkauf", "Verkauft", "Umsatz Verkauf", "Gewinn", "Bild", "Fotos", "Bewertung", "QR-Code",
+            "Marktpreis (Median)", "Marktpreis Stand", "Marktpreis Info")
         private val MOVE_COLS = listOf("Datum", "Schlüssel", "EAN", "Jahrgang", "Art", "Menge", "Preis/Flasche", "Summe", "Name", "Notiz", "Gewinn")
         const val SHEET_REPORT = "Auswertung"
         private val EXCEL_EPOCH: LocalDate = LocalDate.of(1899, 12, 30)
@@ -271,6 +315,9 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
                     photos = get(r, "Fotos").split(';').map { it.trim() }.filter { it.isNotEmpty() },
                     rating = get(r, "Bewertung"),
                     qr = get(r, "QR-Code"),
+                    marketPrice = get(r, "Marktpreis (Median)").replace(',', '.').toDoubleOrNull(),
+                    marketDate = parseDate(get(r, "Marktpreis Stand")),
+                    marketInfo = get(r, "Marktpreis Info"),
                     extra = extraCols.entries.associate { (letter, title) -> title.trim() to r[letter].orEmpty() },
                 )
             }
@@ -356,11 +403,14 @@ class Cellar(wines: List<Wine> = emptyList(), movements: List<Movement> = emptyL
                     .append(fx("O$r", "SUMIFS(${m}\$H:\$H,${m}\$B:\$B,\$A$r,${m}\$E:\$E,\"Verkauf\")", 3))
                 c.stats(x.key).profit?.let { w.append(num("P$r", it.toString(), 3)) }
                 w.append(str("Q$r", x.imageUrl)).append(str("R$r", x.photos.joinToString(";"))).append(str("S$r", x.rating)).append(str("T$r", x.qr))
+                x.marketPrice?.let { w.append(num("U$r", it.toString(), 3)) }
+                x.marketDate?.let { w.append(num("V$r", serial(it).toString(), 2)) }
+                w.append(str("W$r", x.marketInfo))
                 extraTitles.forEachIndexed { j, t -> x.extra[t]?.takeIf { it.isNotEmpty() }?.let { w.append(str("${colName(WINE_COLS.size + j)}$r", it)) } }
                 w.append("</row>")
             }
             put("xl/worksheets/sheet1.xml", sheet(w, "A1:${colName(titles.size - 1)}${c.wines.size + 1}",
-                listOf(22, 15, 9, 34, 22, 12, 16, 16, 9, 24, 16, 9, 11, 9, 14, 11, 30, 30, 24, 30) + extraTitles.map { 16 }))
+                listOf(22, 15, 9, 34, 22, 12, 16, 16, 9, 24, 16, 9, 11, 9, 14, 11, 30, 30, 24, 30, 14, 12, 40) + extraTitles.map { 16 }))
 
             // --- Bewegungen (älteste zuerst)
             val names = c.wines.associate { it.key to it.name }

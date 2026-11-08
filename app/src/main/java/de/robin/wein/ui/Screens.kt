@@ -4,6 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -284,7 +286,7 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
         Box(Modifier.padding(pad)) {
             val key = openKey
             when {
-                key != null -> WineDetail(vm, key, a, onClose = { openKey = null })
+                key != null -> WineDetail(vm, key, a, onOpen = { openKey = it }, onClose = { openKey = null })
                 tab == 0 -> StockTab(vm, onOpen = { openKey = it })
                 tab == 2 -> ReportTab(vm, onOpen = { openKey = it })
                 else -> ScanTab(vm) { action ->
@@ -305,7 +307,7 @@ private fun MainScreen(vm: AppViewModel, a: Actions) {
 private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
     val cellar = vm.cellar
     val list = remember(cellar, vm.query, vm.showAll) {
-        cellar.search(vm.query).filter { vm.showAll || cellar.stats(it.key).stock > 0 }
+        cellar.groupVintages(cellar.search(vm.query).filter { vm.showAll || cellar.stats(it.key).stock > 0 })
     }
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -321,8 +323,8 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
             FilterChip(selected = !vm.showAll, onClick = { vm.showAll = false }, label = { Text("Auf Lager") })
             FilterChip(selected = vm.showAll, onClick = { vm.showAll = true }, label = { Text("Alle") })
             Spacer(Modifier.weight(1f))
-            Text("${cellar.totalStock} Fl. · ${euro(cellar.stockValue)}", style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("${cellar.totalStock} Fl. · ${euro(cellar.stockValue)}" + (cellar.marketValue?.let { " · Markt ${euro(it)}" } ?: ""),
+                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (list.isEmpty()) {
             Text(
@@ -332,8 +334,12 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
             )
         }
         LazyColumn(Modifier.fillMaxSize()) {
-            items(list, key = { it.key }) { w ->
+            items(list, key = { it.first().key }) { group ->
+                // Mehrere Jahrgänge desselben Weins = eine Zeile; antippen öffnet den neuesten mit Bestand
+                val w = group.firstOrNull { cellar.stats(it.key).stock > 0 } ?: group.first()
                 val s = cellar.stats(w.key)
+                val stock = group.sumOf { cellar.stats(it.key).stock }
+                val years = if (group.size > 1) group.joinToString(", ") { "${it.vintageLabel} (${cellar.stats(it.key).stock})" } else w.vintageLabel
                 Row(
                     Modifier.fillMaxWidth().clickable { onOpen(w.key) }.padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -342,13 +348,19 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(w.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(listOf(w.producer, w.vintageLabel, w.region.ifBlank { w.country }).filter { it.isNotBlank() }.joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        Text(listOf(w.producer, w.region.ifBlank { w.country }).filter { it.isNotBlank() }.joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis)
+                        Text(years, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            color = if (group.size > 1) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("${s.stock}", style = MaterialTheme.typography.titleLarge,
-                            color = if (s.stock > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                        s.avgBuy?.let { Text("Ø ${euro(it)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        Text("$stock", style = MaterialTheme.typography.titleLarge,
+                            color = if (stock > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (group.size == 1) {
+                            s.avgBuy?.let { Text("Ø ${euro(it)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            w.marketPrice?.let { Text("Markt ${euro(it)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        } else Text("${group.size} Jahrgänge", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 HorizontalDivider(Modifier.padding(start = 68.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -360,7 +372,7 @@ private fun StockTab(vm: AppViewModel, onOpen: (String) -> Unit) {
 // ---------------------------------------------------------------- Details
 
 @Composable
-private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () -> Unit) {
+private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onOpen: (String) -> Unit, onClose: () -> Unit) {
     val w = vm.cellar.wine(key)
     if (w == null) { LaunchedEffect(key) { onClose() }; return }
     val s = vm.cellar.stats(key)
@@ -368,6 +380,8 @@ private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () ->
     var confirmDeleteWine by remember { mutableStateOf(false) }
     var confirmMove by remember { mutableStateOf<de.robin.wein.core.Movement?>(null) }
     var listing by remember { mutableStateOf(false) }
+    var addVintage by remember { mutableStateOf(false) }
+    val vintages = vm.cellar.vintagesOf(key)
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
         item {
@@ -386,6 +400,15 @@ private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () ->
             }
             Text(listOf(w.producer, w.vintageLabel, w.grape, w.region, w.country).filter { it.isNotBlank() }.joinToString(" · "),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // Jahrgänge dieses Weins: wechseln oder einen weiteren anlegen
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                if (vintages.size > 1) vintages.forEach { v ->
+                    FilterChip(selected = v.key == key, onClick = { if (v.key != key) onOpen(v.key) },
+                        label = { Text("${v.vintageLabel} · ${vm.cellar.stats(v.key).stock}") })
+                }
+                TextButton(onClick = { addVintage = true }) { Text("+ Jahrgang") }
+            }
             QrCode.url(w.qr)?.let { link ->
                 val ctx = LocalContext.current
                 TextButton(onClick = { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link))) } }) { Text("E-Label öffnen") }
@@ -406,6 +429,8 @@ private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () ->
             StatRow("Umsatz", euro(s.revenue), "Gewinn (FIFO)", euro(s.profit))
             if (s.unknownCost > 0) Text("${s.unknownCost} Verkauf/Verkäufe ohne bekannten Einkaufspreis – nicht im Gewinn enthalten.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+            MarketBox(vm, w, s.avgBuy)
 
             Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -437,6 +462,11 @@ private fun WineDetail(vm: AppViewModel, key: String, a: Actions, onClose: () ->
     }
 
     if (listing) ListingDialog(w, s) { listing = false }
+    if (addVintage) AddVintageDialog(w, vintages.map { it.vintage }, onSave = { v ->
+        val k = vm.addVintage(w, v)
+        onOpen(k)
+        a.book(k, MoveKind.BUY)
+    }, onDismiss = { addVintage = false })
     confirmMove?.let { m ->
         ConfirmDialog("Buchung löschen?", "${m.date.format(DATE_FMT)}: ${m.quantity}× ${m.kind.label}. Der Bestand wird entsprechend korrigiert.",
             "Löschen", onConfirm = { vm.removeMovement(m) }, onDismiss = { confirmMove = null })
@@ -454,5 +484,34 @@ private fun StatRow(l1: String, v1: String, l2: String, v2: String) {
         Text(v1, Modifier.weight(1f), fontWeight = FontWeight.Medium)
         Text(l2, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(v2, Modifier.weight(1f), fontWeight = FontWeight.Medium, textAlign = TextAlign.End)
+    }
+}
+
+/** Marktpreis im Netz: Median der Online-Angebote, per Knopf neu ermitteln. */
+@Composable
+private fun MarketBox(vm: AppViewModel, w: Wine, avgBuy: Double?) {
+    val busy = w.key in vm.marketBusy
+    Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Marktpreis im Netz", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val p = w.marketPrice
+            if (p == null) Text(if (vm.hasAi) "noch nicht ermittelt" else "braucht Gemini-Schlüssel (Menü → Online-Quellen)",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("Median ${euro(p)}", fontWeight = FontWeight.Medium)
+                    avgBuy?.takeIf { it > 0 }?.let { b ->
+                        val pct = (p / b - 1) * 100
+                        Text("  ${if (pct >= 0) "+" else "−"}${"%.0f".format(kotlin.math.abs(pct))} % zum Ø Einkauf",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (pct >= 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+                    }
+                }
+                Text(listOfNotNull(w.marketInfo.ifBlank { null }, w.marketDate?.let { "Stand ${it.format(DATE_FMT)}" }).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+        else TextButton(enabled = vm.hasAi, onClick = { vm.checkMarket(w.key) }) { Text(if (w.marketPrice == null) "Ermitteln" else "Aktualisieren") }
     }
 }
